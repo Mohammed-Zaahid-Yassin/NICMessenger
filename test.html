@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f0f2f5;
+        }
+        #messages {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            height: 400px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+        }
+        .message {
+            padding: 8px 12px;
+            margin: 5px 0;
+            background: #e3f2fd;
+            border-radius: 5px;
+        }
+        .system {
+            background: #fff3e0;
+            color: #e65100;
+            font-style: italic;
+        }
+        .input-area {
+            display: flex;
+            gap: 10px;
+        }
+        input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        #status {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+        }
+        .connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .welcome {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <h1>💬 Test Chat</h1>
+    
+    <div id="status" class="disconnected">⛔ Disconnected</div>
+    
+    <div id="messages">
+        <div class="message system">📢 Welcome! Type a message below to test the WebSocket connection.</div>
+    </div>
+    
+    <div class="input-area">
+        <input type="text" id="messageInput" placeholder="Type a message..." disabled>
+        <button id="sendButton" disabled>Send</button>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        // Connect to our backend server
+        const socket = io('http://localhost:4000');
+        
+        const statusDiv = document.getElementById('status');
+        const messagesDiv = document.getElementById('messages');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+
+        // When connected to the server
+        socket.on('connect', () => {
+            statusDiv.className = 'connected';
+            statusDiv.textContent = '✅ Connected to server!';
+            messageInput.disabled = false;
+            sendButton.disabled = false;
+            console.log('Connected to server!');
+        });
+
+        // When disconnected from the server
+        socket.on('disconnect', () => {
+            statusDiv.className = 'disconnected';
+            statusDiv.textContent = '⛔ Disconnected from server';
+            messageInput.disabled = true;
+            sendButton.disabled = true;
+            console.log('Disconnected from server');
+        });
+
+        // Receive welcome message from server
+        socket.on('welcome', (msg) => {
+            console.log('Welcome message:', msg);
+            addMessage('System', msg, true);
+        });
+
+        // Add a message to the chat
+        function addMessage(sender, text, isSystem = false) {
+            const div = document.createElement('div');
+            div.className = 'message' + (isSystem ? ' system' : '');
+            div.textContent = (isSystem ? '📢 ' : '👤 ') + sender + ': ' + text;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        // Send message button click
+        sendButton.addEventListener('click', () => {
+            const message = messageInput.value.trim();
+            if (message) {
+                // Send message to server
+                socket.emit('test message', message);
+                addMessage('You', message);
+                messageInput.value = '';
+                messageInput.focus();
+            }
+        });
+
+        // Send message on Enter key
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendButton.click();
+            }
+        });
+
+        // Receive messages from server
+        socket.on('test message', (data) => {
+            console.log('Received:', data);
+            addMessage(data.from || 'User', data.message);
+        });
+
+        console.log('Test page loaded!');
+    </script>
+</body>
+</html>
