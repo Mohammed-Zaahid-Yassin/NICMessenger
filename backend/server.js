@@ -33,8 +33,7 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Multer Storage Configuration for Avatars
-const storage = new CloudinaryStorage({
+const avatarStorage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
         folder: 'nic-messenger/avatars',
@@ -43,10 +42,16 @@ const storage = new CloudinaryStorage({
     }
 });
 
-const upload = multer({
-    storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+const attachmentStorage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'nic-messenger/attachments',
+        allowed_formats: ['jpg', 'jpeg', 'png', 'webp']
+    }
 });
+
+const uploadAvatar = multer({ storage: avatarStorage, limits: { fileSize: 5 * 1024 * 1024 } });
+const uploadAttachment = multer({ storage: attachmentStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 const io = new Server(server, {
     cors: {
@@ -75,17 +80,21 @@ function initializeDatabase() {
             )
         `, (err) => {
             if (err) return reject(err);
+            
             db.run(`
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER,
                     username TEXT NOT NULL,
-                    content TEXT NOT NULL,
+                    content TEXT,
+                    image_url TEXT DEFAULT NULL,
+                    recipient_id INTEGER DEFAULT NULL,
                     timestamp DATETIME,
                     is_pinned BOOLEAN DEFAULT 0,
                     is_deleted BOOLEAN DEFAULT 0,
                     deleted_by TEXT DEFAULT NULL,
                     edited BOOLEAN DEFAULT 0,
+                    is_read BOOLEAN DEFAULT 0,
                     reply_to INTEGER DEFAULT NULL,
                     reply_to_username TEXT DEFAULT NULL,
                     reply_to_content TEXT DEFAULT NULL,
@@ -93,6 +102,12 @@ function initializeDatabase() {
                 )
             `, (err) => {
                 if (err) return reject(err);
+                
+                // Migrations to safely add missing columns to existing databases
+                db.run("ALTER TABLE messages ADD COLUMN image_url TEXT DEFAULT NULL", () => {});
+                db.run("ALTER TABLE messages ADD COLUMN recipient_id INTEGER DEFAULT NULL", () => {});
+                db.run("ALTER TABLE messages ADD COLUMN is_read BOOLEAN DEFAULT 0", () => {});
+                
                 db.run(`
                     CREATE TABLE IF NOT EXISTS reactions (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -156,14 +171,7 @@ app.post('/api/register', async (req, res) => {
                     res.json({
                         success: true,
                         token,
-                        user: {
-                            id: this.lastID,
-                            username,
-                            role: 'user',
-                            avatar_url: null,
-                            status: 'Online',
-                            bio: 'Hey there! I am using NIC Messenger.'
-                        }
+                        user: { id: this.lastID, username, role: 'user', avatar_url: null, status: 'Online', bio: 'Hey there! I am using NIC Messenger.' }
                     });
                 }
             );
@@ -185,70 +193,49 @@ app.post('/api/login', (req, res) => {
         res.json({
             success: true,
             token,
-            user: {
-                id: user.id,
-                username: user.username,
-                role: user.role,
-                avatar_url: user.avatar_url,
-                status: user.status,
-                bio: user.bio
-            }
+            user: { id: user.id, username: user.username, role: user.role, avatar_url: user.avatar_url, status: user.status, bio: user.bio }
         });
     });
 });
 
 app.post('/api/profile/update', (req, res) => {
     const { userId, bio, status } = req.body;
-    
-    db.run(
-        'UPDATE users SET bio = ?, status = ? WHERE id = ?',
-        [bio, status, userId],
-        function(err) {
-            if (err) {
-                console.error('❌ DB Error updating profile:', err);
-                return res.status(500).json({ error: 'Failed to update profile' });
-            }
-            res.json({ success: true, message: 'Profile updated successfully' });
-            
-            db.get('SELECT id, username, status, avatar_url, bio FROM users WHERE id = ?', [userId], (err, user) => {
-                if (!err && user) {
-                    io.emit('user profile updated', user);
-                }
-            });
-        }
-    );
+    db.run('UPDATE users SET bio = ?, status = ? WHERE id = ?', [bio, status, userId], function(err) {
+        if (err) return res.status(500).json({ error: 'Failed to update profile' });
+        res.json({ success: true, message: 'Profile updated successfully' });
+        db.get('SELECT id, username, status, avatar_url, bio FROM users WHERE id = ?', [userId], (err, user) => {
+            if (!err && user) io.emit('user profile updated', user);
+        });
+    });
 });
 
-// Avatar Image Upload Route
-app.post('/api/profile/avatar', upload.single('avatar'), (req, res) => {
-    if (!req.file || !req.file.path) {
-        return res.status(400).json({ error: 'No image uploaded or invalid file format' });
-    }
-
+app.post('/api/profile/avatar', uploadAvatar.single('avatar'), (req, res) => {
+    if (!req.file || !req.file.path) return res.status(400).json({ error: 'No image uploaded or invalid file format' });
     const { userId } = req.body;
     const avatarUrl = req.file.path;
 
-    db.run(
-        'UPDATE users SET avatar_url = ? WHERE id = ?',
-        [avatarUrl, userId],
-        function(err) {
-            if (err) {
-                console.error('❌ Error saving avatar URL to DB:', err);
-                return res.status(500).json({ error: 'Database update failed' });
-            }
-
-            res.json({ success: true, avatarUrl });
-
-            db.get('SELECT id, username, status, avatar_url, bio FROM users WHERE id = ?', [userId], (err, user) => {
-                if (!err && user) {
-                    io.emit('user profile updated', user);
-                }
-            });
-        }
-    );
+    db.run('UPDATE users SET avatar_url = ? WHERE id = ?', [avatarUrl, userId], function(err) {
+        if (err) return res.status(500).json({ error: 'Database update failed' });
+        res.json({ success: true, avatarUrl });
+        db.get('SELECT id, username, status, avatar_url, bio FROM users WHERE id = ?', [userId], (err, user) => {
+            if (!err && user) io.emit('user profile updated', user);
+        });
+    });
 });
 
-// ===== SOCKET SETUP =====
+app.post('/api/messages/image', (req, res) => {
+    uploadAttachment.single('image')(req, res, function (err) {
+        if (err) {
+            console.error('❌ Cloudinary Upload Error:', err);
+            const errorText = err.message ? String(err.message) : "Unknown Cloudinary API error";
+            return res.status(500).json({ error: errorText });
+        }
+        if (!req.file || !req.file.path) {
+            return res.status(400).json({ error: 'No valid image received by backend' });
+        }
+        res.json({ success: true, imageUrl: req.file.path });
+    });
+});// ===== SOCKET SETUP =====
 const connectedUsers = {};
 const typingUsers = {};
 
@@ -265,6 +252,7 @@ function setupSocketIO() {
     io.use((socket, next) => {
         const token = socket.handshake.auth.token;
         if (!token) return next(new Error('Authentication required'));
+        
         try {
             const decoded = jwt.verify(token, JWT_SECRET);
             socket.userId = decoded.id;
@@ -279,6 +267,8 @@ function setupSocketIO() {
     io.on('connection', (socket) => {
         console.log(`🟢 User connected: ${socket.username}`);
         
+        socket.join(socket.userId.toString());
+        
         db.get('SELECT avatar_url, status, bio FROM users WHERE id = ?', [socket.userId], (err, userProfile) => {
             connectedUsers[socket.id] = {
                 id: socket.userId,
@@ -291,26 +281,60 @@ function setupSocketIO() {
             io.emit('user list', Object.values(connectedUsers));
         });
         
-        db.all(`
-            SELECT m.*, 
-                   GROUP_CONCAT(DISTINCT r.emoji) as reactions, 
-                   GROUP_CONCAT(DISTINCT r.user_username) as reaction_users 
-            FROM messages m 
-            LEFT JOIN reactions r ON m.id = r.message_id 
-            WHERE m.is_deleted = 0 
-            GROUP BY m.id 
-            ORDER BY m.timestamp ASC LIMIT 100
-        `, (err, rows) => {
-            if (err) {
-                console.error('❌ Error fetching previous messages:', err);
-                return;
+        const sendMessagesToClient = (targetRecipientId = null) => {
+            let query = `
+                SELECT m.*, u.avatar_url,
+                       GROUP_CONCAT(DISTINCT r.emoji) as reactions, 
+                       GROUP_CONCAT(DISTINCT r.user_username) as reaction_users 
+                FROM messages m 
+                LEFT JOIN users u ON m.user_id = u.id
+                LEFT JOIN reactions r ON m.id = r.message_id 
+                WHERE m.is_deleted = 0 
+            `;
+            const params = [];
+
+            if (targetRecipientId) {
+                query += ` AND ((m.user_id = ? AND m.recipient_id = ?) OR (m.user_id = ? AND m.recipient_id = ?)) `;
+                params.push(socket.userId, targetRecipientId, targetRecipientId, socket.userId);
+            } else {
+                query += ` AND m.recipient_id IS NULL `;
             }
-            const messages = rows.map(row => ({ 
-                ...row, 
-                reactions: row.reactions ? row.reactions.split(',') : [], 
-                reaction_users: row.reaction_users ? row.reaction_users.split(',') : [] 
-            }));
-            socket.emit('previous messages', messages);
+
+            query += ` GROUP BY m.id ORDER BY m.timestamp ASC LIMIT 100`;
+
+            db.all(query, params, (err, rows) => {
+                if (err) return console.error('❌ Error fetching messages:', err);
+                const messages = rows.map(row => ({ 
+                    ...row, 
+                    reactions: row.reactions ? row.reactions.split(',') : [], 
+                    reaction_users: row.reaction_users ? row.reaction_users.split(',') : [] 
+                }));
+                socket.emit('previous messages', messages);
+            });
+        };
+
+        sendMessagesToClient(null);
+
+        socket.on('switch chat', (recipientId) => {
+            sendMessagesToClient(recipientId);
+        });
+
+        // 👁️ MARK MESSAGES AS READ
+        socket.on('mark read', ({ senderId }) => {
+            if (!senderId) return;
+            const targetSenderId = Number(senderId);
+            
+            db.run(
+                `UPDATE messages SET is_read = 1 WHERE recipient_id = ? AND user_id = ? AND is_read = 0`,
+                [socket.userId, targetSenderId],
+                function(err) {
+                    if (!err && this.changes > 0) {
+                        const payload = { readerId: socket.userId, senderId: targetSenderId };
+                        // Notify both sender and receiver that messages are read
+                        io.to(targetSenderId.toString()).to(socket.userId.toString()).emit('messages read', payload);
+                    }
+                }
+            );
         });
 
         socket.on('typing start', () => { 
@@ -323,134 +347,118 @@ function setupSocketIO() {
             socket.broadcast.emit('user typing', { username: socket.username, isTyping: false }); 
         });
 
-        // 📝 STANDARD MESSAGE
-        socket.on('chat message', (content) => {
-            if (!content || !content.trim()) return;
+        socket.on('chat message', (data) => {
+            const safeContent = String(data.content || '').trim();
+            const safeImageUrl = data.imageUrl || null;
+            const recipientId = data.recipientId || null;
+            
+            if (!safeContent && !safeImageUrl) return;
             const timestamp = new Date().toISOString();
             
             db.run(
-                'INSERT INTO messages (user_id, username, content, timestamp) VALUES (?, ?, ?, ?)', 
-                [socket.userId, socket.username, content.trim(), timestamp], 
+                'INSERT INTO messages (user_id, username, content, timestamp, image_url, recipient_id, is_read) VALUES (?, ?, ?, ?, ?, ?, 0)', 
+                [socket.userId, socket.username, safeContent, timestamp, safeImageUrl, recipientId], 
                 function(err) {
-                    if (err) {
-                        console.error('❌ Error saving message:', err);
-                        return;
-                    }
-                    db.get('SELECT * FROM messages WHERE id = ?', [this.lastID], (err, msg) => {
+                    if (err) return console.error('❌ SQL Insert Error:', err.message);
+                    
+                    db.get('SELECT m.*, u.avatar_url FROM messages m LEFT JOIN users u ON m.user_id = u.id WHERE m.id = ?', [this.lastID], (err, msg) => {
                         if (err || !msg) return;
-                        io.emit('chat message', { ...msg, reactions: [], reaction_users: [], edited: false });
+                        const formattedMsg = { ...msg, reactions: [], reaction_users: [], edited: false, is_read: 0 };
+                        
+                        if (recipientId) {
+                            io.to(recipientId.toString()).to(socket.userId.toString()).emit('chat message', formattedMsg);
+                        } else {
+                            io.emit('chat message', formattedMsg);
+                        }
                     });
                 }
             );
         });
 
-        // ↩️ REPLY MESSAGE
-        socket.on('reply to message', ({ messageId, content, replyToUsername, replyToContent }) => {
-            if (!content || !content.trim()) return;
+        socket.on('reply to message', ({ messageId, content, replyToUsername, replyToContent, recipientId }) => {
+            const safeContent = String(content || '').trim();
+            if (!safeContent) return;
             const targetId = Number(messageId);
             const timestamp = new Date().toISOString();
             
-            console.log(`💬 ${socket.username} is replying to message ID: ${targetId}`);
-            
             db.run(
-                'INSERT INTO messages (user_id, username, content, timestamp, reply_to, reply_to_username, reply_to_content) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [socket.userId, socket.username, content.trim(), timestamp, targetId, replyToUsername || '', replyToContent || ''],
+                'INSERT INTO messages (user_id, username, content, timestamp, reply_to, reply_to_username, reply_to_content, recipient_id, is_read) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
+                [socket.userId, socket.username, safeContent, timestamp, targetId, replyToUsername || '', replyToContent || '', recipientId || null],
                 function(err) {
-                    if (err) {
-                        console.error('❌ DB Error inserting reply:', err);
-                        return;
-                    }
-                    db.get('SELECT * FROM messages WHERE id = ?', [this.lastID], (err, msg) => {
-                        if (err || !msg) {
-                            console.error('❌ Error fetching inserted reply');
-                            return;
+                    if (err) return console.error('❌ DB Error inserting reply:', err);
+                    
+                    db.get('SELECT m.*, u.avatar_url FROM messages m LEFT JOIN users u ON m.user_id = u.id WHERE m.id = ?', [this.lastID], (err, msg) => {
+                        if (err || !msg) return;
+                        const formattedMsg = { ...msg, reactions: [], reaction_users: [], edited: false, is_read: 0 };
+                        
+                        if (recipientId) {
+                            io.to(recipientId.toString()).to(socket.userId.toString()).emit('chat message', formattedMsg);
+                        } else {
+                            io.emit('chat message', formattedMsg);
                         }
-                        io.emit('chat message', { ...msg, reactions: [], reaction_users: [], edited: false });
                     });
                 }
             );
         });
 
-        // ✏️ EDIT MESSAGE
         socket.on('edit message', ({ messageId, content }) => {
             const targetId = Number(messageId);
-            console.log(`✏️ ${socket.username} attempting to edit message ID: ${targetId}`);
+            const safeContent = String(content || '').trim();
             
             db.get('SELECT * FROM messages WHERE id = ?', [targetId], (err, message) => {
-                if (err) {
-                    console.error('❌ Database error on edit lookup:', err);
-                    return socket.emit('error', 'Database error');
-                }
-                if (!message) return socket.emit('error', 'Message not found');
-                
+                if (err || !message) return socket.emit('error', 'Message not found');
                 const isAdmin = socket.role === 'admin';
                 const isOwner = Number(message.user_id) === Number(socket.userId);
-                
-                if (!isAdmin && !isOwner) {
-                    return socket.emit('error', 'Permission denied: You can only edit your own messages.');
-                }
+                if (!isAdmin && !isOwner) return socket.emit('error', 'Permission denied');
 
                 let diffMinutes = 0;
                 if (message.timestamp) {
                     const safeTimestamp = String(message.timestamp).includes('Z') ? message.timestamp : message.timestamp.replace(' ', 'T') + 'Z';
                     diffMinutes = (Date.now() - new Date(safeTimestamp).getTime()) / (1000 * 60);
                 }
+                if (!isAdmin && diffMinutes > 15) return socket.emit('error', 'Time limit exceeded');
 
-                if (!isAdmin && diffMinutes > 15) {
-                    return socket.emit('error', `Time limit exceeded (${diffMinutes.toFixed(1)} mins)`);
-                }
-
-                db.run('UPDATE messages SET content = ?, edited = 1 WHERE id = ?', [content.trim(), targetId], function(err) {
-                    if (err) {
-                        console.error('❌ Error updating message in DB:', err);
-                        return;
-                    }
-                    if (this.changes > 0) {
-                        console.log(`✅ Message ${targetId} edited successfully by ${socket.username}`);
-                        io.emit('message edited', { messageId: targetId, content: content.trim(), username: socket.username });
+                db.run('UPDATE messages SET content = ?, edited = 1 WHERE id = ?', [safeContent, targetId], function(err) {
+                    if (!err && this.changes > 0) {
+                        const payload = { messageId: targetId, content: safeContent, username: socket.username };
+                        if (message.recipient_id) {
+                            io.to(message.recipient_id.toString()).to(message.user_id.toString()).emit('message edited', payload);
+                        } else {
+                            io.emit('message edited', payload);
+                        }
                     }
                 });
             });
         });
 
-        // 🗑️ DELETE MESSAGE
         socket.on('delete message', (messageId) => {
             const targetId = Number(messageId);
-            console.log(`🗑️ ${socket.username} attempting to delete message ID: ${targetId}`);
-            
             db.get('SELECT * FROM messages WHERE id = ?', [targetId], (err, message) => {
-                if (err) {
-                    console.error('❌ Database error on delete lookup:', err);
-                    return socket.emit('error', 'Database error');
-                }
-                if (!message) return socket.emit('error', 'Message not found');
-                
+                if (err || !message) return socket.emit('error', 'Message not found');
                 const isAdmin = socket.role === 'admin';
                 const isOwner = Number(message.user_id) === Number(socket.userId);
-                
-                if (!isAdmin && !isOwner) {
-                    return socket.emit('error', 'Permission denied: You can only delete your own messages.');
-                }
+                if (!isAdmin && !isOwner) return socket.emit('error', 'Permission denied');
 
-                db.run('UPDATE messages SET content = ?, is_deleted = 1, deleted_by = ? WHERE id = ?', 
+                let diffMinutes = 0;
+                if (message.timestamp) {
+                    const safeTimestamp = String(message.timestamp).includes('Z') ? message.timestamp : message.timestamp.replace(' ', 'T') + 'Z';
+                    diffMinutes = (Date.now() - new Date(safeTimestamp).getTime()) / (1000 * 60);
+                }
+                if (!isAdmin && diffMinutes > 15) return socket.emit('error', 'Time limit exceeded');
+
+                db.run('UPDATE messages SET content = ?, image_url = NULL, is_deleted = 1, deleted_by = ? WHERE id = ?', 
                     ['This message was deleted', socket.username, targetId], 
                     function(err) {
-                        if (err) {
-                            console.error('❌ Error marking message as deleted in DB:', err);
-                            return;
-                        }
-                        
-                        if (this.changes > 0) {
+                        if (!err && this.changes > 0) {
                             db.run('DELETE FROM reactions WHERE message_id = ?', [targetId]);
                             db.get('SELECT * FROM messages WHERE id = ?', [targetId], (err, row) => {
                                 if (err || !row) return;
-                                console.log(`✅ Message ${targetId} deleted successfully by ${socket.username}`);
-                                io.emit('message deleted', { 
-                                    messageId: targetId, 
-                                    content: row.content, 
-                                    deleted_by: row.deleted_by, 
-                                    is_deleted: row.is_deleted 
-                                });
+                                const payload = { messageId: targetId, content: row.content, deleted_by: row.deleted_by, is_deleted: row.is_deleted };
+                                if (message.recipient_id) {
+                                    io.to(message.recipient_id.toString()).to(message.user_id.toString()).emit('message deleted', payload);
+                                } else {
+                                    io.emit('message deleted', payload);
+                                }
                             });
                         }
                     }
@@ -458,31 +466,34 @@ function setupSocketIO() {
             });
         });
 
-        // 👍 REACTIONS
         socket.on('add reaction', ({ messageId, emoji }) => {
             const targetId = Number(messageId);
-            db.get('SELECT * FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', [targetId, socket.userId, emoji], (err, row) => {
-                if (row) {
-                    db.run('DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', [targetId, socket.userId, emoji], () => sendReactionUpdate(targetId));
-                } else {
-                    db.run('INSERT INTO reactions (message_id, user_id, user_username, emoji) VALUES (?, ?, ?, ?)', [targetId, socket.userId, socket.username, emoji], () => sendReactionUpdate(targetId));
-                }
+            db.get('SELECT * FROM messages WHERE id = ?', [targetId], (msgErr, msgRow) => {
+                if (msgErr || !msgRow) return;
+                
+                db.get('SELECT * FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', [targetId, socket.userId, emoji], (err, row) => {
+                    if (row) {
+                        db.run('DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', [targetId, socket.userId, emoji], () => sendReactionUpdate(targetId, msgRow));
+                    } else {
+                        db.run('INSERT INTO reactions (message_id, user_id, user_username, emoji) VALUES (?, ?, ?, ?)', [targetId, socket.userId, socket.username, emoji], () => sendReactionUpdate(targetId, msgRow));
+                    }
+                });
             });
         });
 
-        function sendReactionUpdate(messageId) {
+        function sendReactionUpdate(messageId, msgRow) {
             db.all('SELECT emoji, user_username FROM reactions WHERE message_id = ?', [messageId], (err, rows) => {
                 if (!err) {
-                    io.emit('message reaction', { 
-                        messageId: messageId, 
-                        reactions: rows.map(r => r.emoji), 
-                        reactionUsers: rows.map(r => r.user_username) 
-                    });
+                    const payload = { messageId: messageId, reactions: rows.map(r => r.emoji), reactionUsers: rows.map(r => r.user_username) };
+                    if (msgRow && msgRow.recipient_id) {
+                        io.to(msgRow.recipient_id.toString()).to(msgRow.user_id.toString()).emit('message reaction', payload);
+                    } else {
+                        io.emit('message reaction', payload);
+                    }
                 }
             });
         }
 
-        // 👢 ADMIN KICK
         socket.on('kick user', (targetUsername) => {
             if (socket.role !== 'admin') return;
             const target = Object.entries(connectedUsers).find(([_, user]) => user.username === targetUsername);
