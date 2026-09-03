@@ -8,7 +8,7 @@ function Login({ onLogin, error }) {
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (username.trim().length < 2) {
       setLocalError('Username must be at least 2 characters');
       return;
@@ -39,12 +39,16 @@ function Login({ onLogin, error }) {
           </p>
         </div>
         
-        <form onSubmit={handleSubmit}>
+        {/* We block the form from doing anything naturally */}
+        <form onSubmit={(e) => e.preventDefault()}>
           <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-medium mb-2">
+            <label htmlFor="username" className="block text-gray-700 text-sm font-medium mb-2">
               Username
             </label>
             <input
+              id="username"
+              name="username"
+              autoComplete="username"
               type="text"
               placeholder="Enter your username..."
               value={username}
@@ -59,10 +63,13 @@ function Login({ onLogin, error }) {
           </div>
           
           <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-medium mb-2">
+            <label htmlFor="password" className="block text-gray-700 text-sm font-medium mb-2">
               Password
             </label>
             <input
+              id="password"
+              name="password"
+              autoComplete={isSignup ? "new-password" : "current-password"}
               type="password"
               placeholder="Enter your password..."
               value={password}
@@ -79,8 +86,10 @@ function Login({ onLogin, error }) {
             <p className="text-red-500 text-sm mb-4">{localError || error}</p>
           )}
           
+          {/* Button type changed to "button" and onClick added here */}
           <button
-            type="submit"
+            type="button"
+            onClick={handleSubmit}
             disabled={loading}
             className="w-full bg-nic-blue text-white py-3 rounded-xl hover:bg-blue-600 transition font-medium text-lg disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -90,6 +99,7 @@ function Login({ onLogin, error }) {
         
         <div className="mt-4 text-center">
           <button
+            type="button"
             onClick={() => {
               setIsSignup(!isSignup);
               setLocalError('');
