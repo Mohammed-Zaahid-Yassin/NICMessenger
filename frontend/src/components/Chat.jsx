@@ -3,9 +3,10 @@ import ProfileModal from './ProfileModal';
 import MessageList from './MessageList';
 
 function Chat({
-  messages, users, sendMessage, username, userRole, userId, isConnected,
+  messages, users, channels, sendMessage, username, userRole, userId, isConnected,
   onKick, onDeleteMessage, onLogout, sendTyping, addReaction, replyToMessage, editMessage,
-  activeChat, changeChat, unreadCounts, theme, setTheme
+  createChannel, editChannel, deleteChannel, getChannelMembers, activeChat, changeChat, unreadCounts, theme, setTheme,
+  fetchOlderMessages, hasMoreMessages, isFetchingHistory
 }) {
     const [newMessage, setNewMessage] = useState('');
     const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -14,23 +15,35 @@ function Chat({
     const [editingMessage, setEditingMessage] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
     
+    // Channel Management Modals
+    const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
+    const [isEditChannelOpen, setIsEditChannelOpen] = useState(false);
+    
+    // Form States
+    const [newChannelName, setNewChannelName] = useState('');
+    const [newChannelDesc, setNewChannelDesc] = useState('');
+    const [selectedMembers, setSelectedMembers] = useState([]);
+
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
+    const previousMessagesLengthRef = useRef(messages.length); // NEW: Track length to detect pagination vs new message
 
     const myProfile = users.find(u => u.username === username) || {
         id: userId, username: username, avatar_url: null, status: 'Online', bio: ''
     };
 
-    const scrollToBottom = () => {
-        if (!searchQuery) {
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // FIXED: Smart Scroll Engine. Only auto-scrolls on initial load or single new messages.
+    useEffect(() => { 
+        const isPagination = messages.length >= previousMessagesLengthRef.current + 20; 
+        if (!searchQuery && !isPagination) {
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); 
         }
-    };
+        previousMessagesLengthRef.current = messages.length;
+    }, [messages, searchQuery]);
 
-    useEffect(() => { scrollToBottom(); }, [messages]);
     useEffect(() => { setSearchQuery(''); setIsSearchOpen(false); }, [activeChat]);
 
     const handleTyping = (e) => {
@@ -43,38 +56,24 @@ function Chat({
     const handleImageUpload = async (e) => {
         const file = e.target.files[0];
         if (!file || !isConnected) return;
-
         setIsUploading(true);
         const formData = new FormData();
         formData.append('image', file);
 
         try {
-            const res = await fetch('http://localhost:4000/api/messages/image', {
-                method: 'POST',
-                body: formData
-            });
-            const text = await res.text();
-            let data;
-            try { data = JSON.parse(text); } catch (e) { throw new Error("Server returned an invalid response."); }
-            
+            const res = await fetch('http://localhost:4000/api/messages/image', { method: 'POST', body: formData });
+            const data = await res.json();
             if (res.ok && data.success) {
                 sendMessage({ content: newMessage, imageUrl: data.imageUrl });
                 setNewMessage('');
-            } else {
-                throw new Error(data.error || "Failed to save image");
-            }
-        } catch (error) {
-            alert(`Upload Error: ${error.message}`);
-        } finally {
-            setIsUploading(false);
-            if (fileInputRef.current) fileInputRef.current.value = '';
-        }
+            } else throw new Error(data.error || "Failed to save image");
+        } catch (error) { alert(`Upload Error: ${error.message}`); } 
+        finally { setIsUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
     };
 
     const handleSendMessage = (e) => {
         e.preventDefault();
         const safeMessage = String(newMessage).trim();
-        
         if ((!safeMessage && !isUploading) || !isConnected) return;
 
         if (editingMessage) {
@@ -90,22 +89,58 @@ function Chat({
         sendTyping(false);
     };
 
-    const typingUsers = users.filter(u => u.isTyping && u.username !== username);
+    const handleCreateChannel = (e) => {
+        e.preventDefault();
+        if (!newChannelName.trim()) return;
+        createChannel({
+            name: newChannelName.trim().replace(/\s+/g, '-').toLowerCase(),
+            description: newChannelDesc.trim(),
+            members: selectedMembers
+        });
+        setIsCreateChannelOpen(false);
+        setNewChannelName(''); setNewChannelDesc(''); setSelectedMembers([]);
+    };
 
+    const openEditModal = () => {
+        setNewChannelName(activeChat.name);
+        setNewChannelDesc(activeChat.description || '');
+        setSelectedMembers([]); 
+        setIsEditChannelOpen(true); 
+        
+        getChannelMembers(activeChat.id, (members) => {
+            setSelectedMembers(members);
+        });
+    };
+
+    const handleEditChannelSubmit = (e) => {
+        e.preventDefault();
+        if (!newChannelName.trim()) return;
+        editChannel({
+            channelId: activeChat.id,
+            name: newChannelName.trim().replace(/\s+/g, '-').toLowerCase(),
+            description: newChannelDesc.trim(),
+            members: selectedMembers
+        });
+        setIsEditChannelOpen(false);
+        setNewChannelName(''); setNewChannelDesc(''); setSelectedMembers([]);
+    };
+
+    const toggleMemberSelection = (targetId) => {
+        setSelectedMembers(prev => prev.includes(targetId) ? prev.filter(id => id !== targetId) : [...prev, targetId]);
+    };
+
+    const typingUsers = users.filter(u => u.isTyping && u.username !== username);
     const displayedMessages = messages.filter((msg) => {
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
         return (msg.content && msg.content.toLowerCase().includes(q)) || (msg.username && msg.username.toLowerCase().includes(q));
     });
 
-    const mockSocket = {
-        emit: (event, data) => {
+    const mockSocket = { emit: (event, data) => {
             if (event === 'delete message') onDeleteMessage(data);
             if (event === 'add reaction') addReaction(data.messageId, data.emoji);
-        }
-    };
+    }};
 
-    // Dynamic Theme Classes
     const sidebarBg = theme === 'black' ? 'bg-[#050505] border-[#1a1a1a]' : 'bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border-slate-200 dark:border-slate-800';
     const mainBg = theme === 'black' ? 'bg-black' : 'bg-transparent';
     const headerBg = theme === 'black' ? 'bg-[#0a0a0a]/80 border-[#1a1a1a]' : 'bg-white/60 dark:bg-slate-950/60 border-slate-200 dark:border-slate-800';
@@ -124,44 +159,57 @@ function Chat({
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar">
-                    <div 
-                        onClick={() => changeChat(null)} 
-                        className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${!activeChat ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-indigo-50 dark:bg-indigo-500/20 shadow-inner') : 'hover:bg-black/10 dark:hover:bg-white/5'}`}
-                    >
-                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg ${!activeChat ? 'text-indigo-400 drop-shadow-[0_0_8px_rgba(129,140,248,0.8)]' : 'text-slate-400'}`}>
-                            #
-                        </div>
+                    {/* General Chat */}
+                    <div onClick={() => changeChat(null, false)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${activeChat === null ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-indigo-50 dark:bg-indigo-500/20 shadow-inner') : 'hover:bg-black/10 dark:hover:bg-white/5'}`}>
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg ${activeChat === null ? 'text-indigo-400 drop-shadow-[0_0_8px_rgba(129,140,248,0.8)]' : 'text-slate-400'}`}>#</div>
                         <div className="flex-1 flex justify-between items-center pr-1">
                             <span className="font-semibold text-sm tracking-wide">General</span>
-                            {unreadCounts['general'] > 0 && (
-                                <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.6)]">
-                                    {unreadCounts['general']}
-                                </span>
-                            )}
+                            {unreadCounts['general'] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts['general']}</span>}
                         </div>
                     </div>
 
+                    {/* Channels Section - ENTIRE BLOCK IS ALWAYS VISIBLE */}
+                    <div className="pt-4 pb-2 flex justify-between items-center px-3">
+                        <h3 className="text-[10px] font-bold text-slate-500 tracking-[0.2em] uppercase">Channels</h3>
+                        {/* ONLY the Add Button is hidden from members */}
+                        {userRole === 'admin' && (
+                            <button onClick={() => setIsCreateChannelOpen(true)} className="text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer p-1" title="Create Channel">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                            </button>
+                        )}
+                    </div>
+
+                    {channels.map(c => {
+                        const isActive = activeChat?.isChannel && activeChat?.id === c.id;
+                        return (
+                            <div key={`channel_${c.id}`} onClick={() => changeChat(c, true)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${isActive ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-slate-100 dark:bg-slate-800/80') : 'hover:bg-black/5 dark:hover:bg-white/5'}`}>
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner ${isActive ? 'bg-gradient-to-br from-cyan-500 to-blue-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
+                                    #
+                                </div>
+                                <div className="flex flex-col flex-1 min-w-0">
+                                    <span className={`text-sm font-semibold truncate ${isActive ? 'text-cyan-400' : ''}`}>{c.name}</span>
+                                </div>
+                                {unreadCounts[`channel_${c.id}`] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts[`channel_${c.id}`]}</span>}
+                            </div>
+                        );
+                    })}
+
+                    {/* DMs Section */}
                     <div className="pt-4 pb-2">
                         <h3 className="text-[10px] font-bold text-slate-500 tracking-[0.2em] uppercase px-3">Encrypted DMs</h3>
                     </div>
 
                     {users.map(u => {
                         if (u.username === username) return null;
-                        const isActive = activeChat?.id === u.id;
+                        const isActive = !activeChat?.isChannel && activeChat?.id === u.id;
                         
                         return (
-                            <div 
-                                key={u.id || u.username} 
-                                onClick={() => changeChat(u)}
-                                className={`flex items-center gap-3 group p-2.5 rounded-xl cursor-pointer transition-all ${isActive ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-slate-100 dark:bg-slate-800/80') : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
-                            >
+                            <div key={u.id || u.username} onClick={() => changeChat(u, false)} className={`flex items-center gap-3 group p-2.5 rounded-xl cursor-pointer transition-all ${isActive ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-slate-100 dark:bg-slate-800/80') : 'hover:bg-black/5 dark:hover:bg-white/5'}`}>
                                 <div className="relative">
                                     {u.avatar_url ? (
-                                        <img src={u.avatar_url} alt={u.username} className={`w-8 h-8 rounded-xl object-cover transition-all ${isActive ? 'ring-2 ring-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.3)]' : ''}`} />
+                                        <img src={u.avatar_url} alt={u.username} className={`w-8 h-8 rounded-xl object-cover transition-all ${isActive ? 'ring-2 ring-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : ''}`} />
                                     ) : (
-                                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-slate-700 to-slate-600 flex items-center justify-center font-bold text-sm text-white shadow-inner">
-                                            {u.username?.charAt(0).toUpperCase() || '?'}
-                                        </div>
+                                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-slate-700 to-slate-600 flex items-center justify-center font-bold text-sm text-white shadow-inner">{u.username?.charAt(0).toUpperCase() || '?'}</div>
                                     )}
                                     <span className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 ${theme === 'black' ? 'border-[#0a0a0a]' : 'border-white dark:border-slate-900'} ${u.status === 'Online' ? 'bg-cyan-500 shadow-[0_0_5px_rgba(6,182,212,0.8)]' : u.status === 'Away' ? 'bg-amber-500' : u.status === 'Do Not Disturb' ? 'bg-rose-500' : 'bg-slate-500'}`}></span>
                                 </div>
@@ -169,12 +217,7 @@ function Chat({
                                     <span className={`text-sm font-semibold truncate ${isActive ? 'text-indigo-400' : ''}`}>{u.username}</span>
                                     <span className="text-[10px] text-slate-500 truncate">{u.status !== 'Online' ? u.status : 'Active'}</span>
                                 </div>
-                                
-                                {unreadCounts[u.id] > 0 && (
-                                    <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">
-                                        {unreadCounts[u.id]}
-                                    </span>
-                                )}
+                                {unreadCounts[u.id] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts[u.id]}</span>}
                             </div>
                         );
                     })}
@@ -210,10 +253,29 @@ function Chat({
                 <div className={`h-16 border-b flex items-center justify-between px-6 backdrop-blur-xl sticky top-0 z-10 ${headerBg}`}>
                     <div className="flex items-center gap-3">
                         {activeChat ? (
-                            <>
-                                <span className="text-cyan-500 font-bold text-2xl drop-shadow-[0_0_5px_rgba(6,182,212,0.8)]">@</span>
-                                <h3 className="font-bold text-lg tracking-wide">{activeChat.username}</h3>
-                            </>
+                            activeChat.isChannel ? (
+                                <div className="flex items-center gap-3">
+                                    <span className="text-cyan-500 font-bold text-2xl drop-shadow-[0_0_5px_rgba(6,182,212,0.8)]">#</span>
+                                    <h3 className="font-bold text-lg tracking-wide">{activeChat.name}</h3>
+                                    
+                                    {/* ADMIN ONLY: Edit & Delete Toolbar inside the header */}
+                                    {userRole === 'admin' && (
+                                        <div className="flex items-center gap-1 ml-4 border-l border-slate-200 dark:border-slate-800 pl-4">
+                                            <button onClick={openEditModal} className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Edit Channel Settings">
+                                                ✏️
+                                            </button>
+                                            <button onClick={() => { if (window.confirm("Permanently nuke this channel and all its data?")) deleteChannel(activeChat.id); }} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Delete Channel">
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <>
+                                    <span className="text-indigo-500 font-bold text-2xl drop-shadow-[0_0_5px_rgba(99,102,241,0.8)]">@</span>
+                                    <h3 className="font-bold text-lg tracking-wide">{activeChat.username}</h3>
+                                </>
+                            )
                         ) : (
                             <>
                                 <span className="text-slate-400 font-bold text-2xl">#</span>
@@ -227,11 +289,7 @@ function Chat({
                             {isSearchOpen ? (
                                 <div className={`flex items-center border rounded-full px-3 py-1.5 shadow-inner transition-all w-48 sm:w-64 ${theme === 'black' ? 'bg-[#0a0a0a] border-[#222]' : 'bg-slate-100 dark:bg-slate-950 border-slate-200 dark:border-slate-800'}`}>
                                     <svg className="w-4 h-4 text-slate-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                                    <input 
-                                        type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                                        placeholder="Search logs..." autoFocus
-                                        className="bg-transparent border-none text-xs focus:outline-none w-full"
-                                    />
+                                    <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search logs..." autoFocus className="bg-transparent border-none text-xs focus:outline-none w-full" />
                                     <button onClick={() => { setSearchQuery(''); setIsSearchOpen(false); }} className="text-slate-400 hover:text-cyan-400 text-xs ml-1">✕</button>
                                 </div>
                             ) : (
@@ -250,10 +308,13 @@ function Chat({
                             <button onClick={() => setSearchQuery('')} className="hover:underline font-bold uppercase tracking-wider text-[10px]">Terminate</button>
                         </div>
                     )}
+                    
+                    {/* FIXED: Passing down Pagination Props */}
                     <MessageList 
                         messages={displayedMessages} currentUser={myProfile} socket={mockSocket}
                         onReply={setReplyTo} onEdit={(msg) => { setEditingMessage(msg); setNewMessage(msg.content); }}
                         searchQuery={searchQuery} theme={theme}
+                        fetchOlderMessages={fetchOlderMessages} hasMoreMessages={hasMoreMessages} isFetchingHistory={isFetchingHistory} 
                     />
                     <div ref={messagesEndRef} />
                 </div>
@@ -279,27 +340,21 @@ function Chat({
                             type="button" onClick={() => fileInputRef.current?.click()}
                             disabled={!isConnected || isUploading || editingMessage}
                             className={`p-3.5 rounded-full transition-all disabled:opacity-50 ${theme === 'black' ? 'bg-[#1a1a1a] hover:bg-[#222] hover:text-cyan-400 border border-[#333]' : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-indigo-500'}`}
-                            title="Attach Image"
                         >
-                            {isUploading ? (
-                                <span className="animate-spin block">⏳</span>
-                            ) : (
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                            )}
+                            {isUploading ? <span className="animate-spin block">⏳</span> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>}
                         </button>
                         
                         <div className="flex-1 relative">
                             <input
                                 type="text" value={newMessage} onChange={handleTyping}
-                                placeholder={isConnected ? `Initialize connection to ${activeChat ? '@' + activeChat.username : '#general'}...` : "Connecting to relay..."}
+                                placeholder={isConnected ? `Initialize connection to ${activeChat ? (activeChat.isChannel ? '#' + activeChat.name : '@' + activeChat.username) : '#general'}...` : "Connecting to relay..."}
                                 disabled={!isConnected || isUploading}
                                 className={`w-full border rounded-full px-5 py-3.5 focus:outline-none transition-all disabled:opacity-50 text-sm ${theme === 'black' ? 'bg-[#0a0a0a] border-[#222] focus:border-cyan-500 shadow-[inset_0_1px_3px_rgba(0,0,0,0.5)] placeholder-gray-600' : 'bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 placeholder-slate-400 dark:placeholder-slate-500'}`}
                             />
                         </div>
                         
                         <button 
-                            type="submit"
-                            disabled={(!newMessage.trim() && !isUploading) || !isConnected}
+                            type="submit" disabled={(!newMessage.trim() && !isUploading) || !isConnected}
                             className={`p-3.5 rounded-full transition-all disabled:opacity-50 disabled:shadow-none ${theme === 'black' ? 'bg-cyan-600 hover:bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.4)]' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/20'}`}
                         >
                             <svg className="w-5 h-5 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
@@ -308,34 +363,93 @@ function Chat({
                 </div>
             </div>
 
-            {/* FULL SCREEN SETTINGS MODAL */}
+            {/* ADMIN ONLY: CREATE CHANNEL MODAL */}
+            {userRole === 'admin' && isCreateChannelOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className={`w-[500px] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${theme === 'black' ? 'bg-[#0a0a0a] border border-[#222]' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
+                        <div className={`p-4 border-b flex justify-between items-center ${theme === 'black' ? 'border-[#1a1a1a] bg-[#050505]' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50'}`}>
+                            <h2 className="text-sm font-bold uppercase tracking-widest text-cyan-500">Create Secure Channel</h2>
+                            <button onClick={() => setIsCreateChannelOpen(false)} className="text-slate-400 hover:text-rose-500">✕</button>
+                        </div>
+                        <form onSubmit={handleCreateChannel} className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Channel Name</label>
+                                <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} required placeholder="e.g. core-team" className={`w-full border rounded-xl px-4 py-3 focus:outline-none text-sm ${theme === 'black' ? 'bg-[#111] border-[#333] focus:border-cyan-500' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 focus:border-indigo-500'}`} />
+                            </div>
+                            
+                            <div className={`mt-4 border rounded-xl p-3 max-h-48 overflow-y-auto custom-scrollbar ${theme === 'black' ? 'border-[#333] bg-[#111]' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50'}`}>
+                                <p className="text-xs font-bold text-slate-500 uppercase mb-2">Select Channel Members</p>
+                                {users.filter(u => u.username !== username).map(u => (
+                                    <div key={u.id} onClick={() => toggleMemberSelection(u.id)} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedMembers.includes(u.id) ? (theme === 'black' ? 'bg-[#222] border border-cyan-500/50' : 'bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-500/30') : 'hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'}`}>
+                                        <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-slate-700 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden">
+                                            {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : u.username.charAt(0).toUpperCase()}
+                                        </div>
+                                        <span className="text-sm font-semibold flex-1">{u.username}</span>
+                                        {selectedMembers.includes(u.id) && <span className="text-indigo-500 dark:text-cyan-400">✓</span>}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="pt-4 flex justify-end gap-3">
+                                <button type="button" onClick={() => setIsCreateChannelOpen(false)} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>Cancel</button>
+                                <button type="submit" disabled={!newChannelName.trim()} className={`px-6 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 ${theme === 'black' ? 'bg-cyan-600 text-black hover:bg-cyan-500' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>Create</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* ADMIN ONLY: EDIT CHANNEL MODAL */}
+            {userRole === 'admin' && isEditChannelOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className={`w-[500px] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${theme === 'black' ? 'bg-[#0a0a0a] border border-[#222]' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
+                        <div className={`p-4 border-b flex justify-between items-center ${theme === 'black' ? 'border-[#1a1a1a] bg-[#050505]' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50'}`}>
+                            <h2 className="text-sm font-bold uppercase tracking-widest text-emerald-500">Edit Settings: {activeChat?.name}</h2>
+                            <button onClick={() => setIsEditChannelOpen(false)} className="text-slate-400 hover:text-rose-500">✕</button>
+                        </div>
+                        <form onSubmit={handleEditChannelSubmit} className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Rename Channel</label>
+                                <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} required placeholder="e.g. core-team" className={`w-full border rounded-xl px-4 py-3 focus:outline-none text-sm ${theme === 'black' ? 'bg-[#111] border-[#333] focus:border-cyan-500' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 focus:border-indigo-500'}`} />
+                            </div>
+                            
+                            <div className={`mt-4 border rounded-xl p-3 max-h-48 overflow-y-auto custom-scrollbar ${theme === 'black' ? 'border-[#333] bg-[#111]' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50'}`}>
+                                <p className="text-xs font-bold text-slate-500 uppercase mb-2">Manage Channel Members</p>
+                                {users.filter(u => u.username !== username).map(u => (
+                                    <div key={u.id} onClick={() => toggleMemberSelection(u.id)} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedMembers.includes(u.id) ? (theme === 'black' ? 'bg-[#222] border border-emerald-500/50' : 'bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-500/30') : 'hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'}`}>
+                                        <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-slate-700 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden">
+                                            {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : u.username.charAt(0).toUpperCase()}
+                                        </div>
+                                        <span className="text-sm font-semibold flex-1">{u.username}</span>
+                                        {selectedMembers.includes(u.id) && <span className="text-emerald-500">✓</span>}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="pt-4 flex justify-end gap-3">
+                                <button type="button" onClick={() => setIsEditChannelOpen(false)} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>Cancel</button>
+                                <button type="submit" disabled={!newChannelName.trim()} className={`px-6 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 ${theme === 'black' ? 'bg-emerald-600 text-black hover:bg-emerald-500' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>Save Changes</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* SETTINGS MODAL */}
             {isSettingsOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
                     <div className={`w-[600px] h-[400px] flex rounded-2xl shadow-2xl overflow-hidden ${theme === 'black' ? 'bg-[#0a0a0a] border border-[#222]' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
-                        {/* Modal Sidebar */}
                         <div className={`w-1/3 p-4 flex flex-col gap-2 ${theme === 'black' ? 'bg-[#050505] border-r border-[#1a1a1a]' : 'bg-slate-50 dark:bg-slate-800/50 border-r border-slate-200 dark:border-slate-800'}`}>
                             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 px-2">Settings</h3>
-                            <button className={`text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${theme === 'black' ? 'bg-[#1a1a1a] text-cyan-400 border border-[#333]' : 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'}`}>
-                                🎨 Theme Engine
-                            </button>
+                            <button className={`text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${theme === 'black' ? 'bg-[#1a1a1a] text-cyan-400 border border-[#333]' : 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'}`}>🎨 Theme Engine</button>
                         </div>
-                        {/* Modal Content */}
                         <div className="w-2/3 p-6 relative">
-                            <button onClick={() => setIsSettingsOpen(false)} className="absolute top-4 right-4 p-2 text-slate-400 hover:text-rose-500 transition-colors">
-                                ✕
-                            </button>
+                            <button onClick={() => setIsSettingsOpen(false)} className="absolute top-4 right-4 p-2 text-slate-400 hover:text-rose-500 transition-colors">✕</button>
                             <h2 className={`text-xl font-bold mb-6 ${theme === 'black' ? 'text-white' : 'text-slate-800 dark:text-white'}`}>Theme Engine</h2>
-                            
                             <div className="space-y-3">
-                                <button onClick={() => setTheme('light')} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${theme === 'light' ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-bold' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-                                    ☀️ Light Mode
-                                </button>
-                                <button onClick={() => setTheme('dark')} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${theme === 'dark' ? 'border-indigo-500 bg-indigo-500/10 text-indigo-400 font-bold' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-                                    🌙 Dark Mode
-                                </button>
-                                <button onClick={() => setTheme('black')} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${theme === 'black' ? 'border-cyan-500 bg-[#111] text-cyan-400 font-bold shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
-                                    ⬛ Black (OLED)
-                                </button>
+                                <button onClick={() => setTheme('light')} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${theme === 'light' ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-bold' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>☀️ Light Mode</button>
+                                <button onClick={() => setTheme('dark')} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${theme === 'dark' ? 'border-indigo-500 bg-indigo-500/10 text-indigo-400 font-bold' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>🌙 Dark Mode</button>
+                                <button onClick={() => setTheme('black')} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${theme === 'black' ? 'border-cyan-500 bg-[#111] text-cyan-400 font-bold shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>⬛ Black (OLED)</button>
                             </div>
                         </div>
                     </div>
