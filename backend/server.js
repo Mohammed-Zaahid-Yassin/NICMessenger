@@ -42,7 +42,10 @@ const avatarStorage = new CloudinaryStorage({
 
 const attachmentStorage = new CloudinaryStorage({
     cloudinary: cloudinary,
-    params: { folder: 'nic-messenger/attachments', allowed_formats: ['jpg', 'jpeg', 'png', 'webp'] }
+    params: { 
+        folder: 'nic-messenger/attachments', 
+        allowed_formats: ['jpg', 'jpeg', 'png', 'webp'] 
+    }
 });
 
 const uploadAvatar = multer({ storage: avatarStorage, limits: { fileSize: 5 * 1024 * 1024 } });
@@ -66,10 +69,14 @@ function initializeDatabase() {
                 avatar_url TEXT DEFAULT NULL,
                 status TEXT DEFAULT 'Online',
                 bio TEXT DEFAULT 'Hey there! I am using NIC Messenger.',
+                club_roles TEXT DEFAULT '[]',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         `, (err) => {
             if (err) return reject(err);
+            
+            // Safe fallback to ensure the column exists on older DBs
+            db.run("ALTER TABLE users ADD COLUMN club_roles TEXT DEFAULT '[]'", () => {}); 
             
             db.run(`
                 CREATE TABLE IF NOT EXISTS messages (
@@ -93,11 +100,6 @@ function initializeDatabase() {
                 )
             `, (err) => {
                 if (err) return reject(err);
-                
-                db.run("ALTER TABLE messages ADD COLUMN image_url TEXT DEFAULT NULL", () => {});
-                db.run("ALTER TABLE messages ADD COLUMN recipient_id INTEGER DEFAULT NULL", () => {});
-                db.run("ALTER TABLE messages ADD COLUMN is_read BOOLEAN DEFAULT 0", () => {});
-                db.run("ALTER TABLE messages ADD COLUMN channel_id INTEGER DEFAULT NULL", () => {});
                 
                 db.run(`
                     CREATE TABLE IF NOT EXISTS reactions (
@@ -158,71 +160,111 @@ function createAdminAccount() {
             } else resolve();
         });
     });
-}
-
-app.post('/api/register', async (req, res) => {
+}app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+    
     try {
         db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
             if (user) return res.status(400).json({ error: 'Username already taken' });
+            
             const hashedPassword = await bcrypt.hash(password, 10);
             db.run('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword], function(err) {
                 if (err) return res.status(500).json({ error: 'Error creating user' });
+                
                 const token = jwt.sign({ id: this.lastID, username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
-                res.json({ success: true, token, user: { id: this.lastID, username, role: 'user', avatar_url: null, status: 'Online', bio: 'Hey there! I am using NIC Messenger.' } });
+                res.json({ 
+                    success: true, 
+                    token, 
+                    user: { 
+                        id: this.lastID, 
+                        username, 
+                        role: 'user', 
+                        avatar_url: null, 
+                        status: 'Online', 
+                        bio: 'Hey there! I am using NIC Messenger.',
+                        club_roles: []
+                    } 
+                });
             });
         });
-    } catch (error) { res.status(500).json({ error: 'Server error' }); }
+    } catch (error) { 
+        res.status(500).json({ error: 'Server error' }); 
+    }
 });
 
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
     db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
         if (err || !user) return res.status(400).json({ error: 'User not found' });
+        
         const validPassword = await bcrypt.compare(password, user.password);
         if (!validPassword) return res.status(400).json({ error: 'Invalid password' });
+        
         const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ success: true, token, user: { id: user.id, username: user.username, role: user.role, avatar_url: user.avatar_url, status: user.status, bio: user.bio } });
+        const parsedRoles = user.club_roles ? JSON.parse(user.club_roles) : [];
+        
+        res.json({ 
+            success: true, 
+            token, 
+            user: { 
+                id: user.id, 
+                username: user.username, 
+                role: user.role, 
+                avatar_url: user.avatar_url, 
+                status: user.status, 
+                bio: user.bio,
+                club_roles: parsedRoles 
+            } 
+        });
     });
 });
 
 app.post('/api/profile/update', (req, res) => {
-    const { userId, bio, status } = req.body;
-    db.run('UPDATE users SET bio = ?, status = ? WHERE id = ?', [bio, status, userId], function(err) {
+    const { userId, bio, status, clubRoles } = req.body;
+    const rolesStr = clubRoles ? JSON.stringify(clubRoles) : '[]';
+    
+    db.run('UPDATE users SET bio = ?, status = ?, club_roles = ? WHERE id = ?', [bio, status, rolesStr, userId], function(err) {
         if (err) return res.status(500).json({ error: 'Failed to update profile' });
+        
         res.json({ success: true, message: 'Profile updated successfully' });
-        db.get('SELECT id, username, status, avatar_url, bio FROM users WHERE id = ?', [userId], (err, user) => {
-            if (!err && user) io.emit('user profile updated', user);
+        
+        db.get('SELECT id, username, status, avatar_url, bio, club_roles FROM users WHERE id = ?', [userId], (err, user) => {
+            if (!err && user) {
+                user.club_roles = user.club_roles ? JSON.parse(user.club_roles) : [];
+                io.emit('user profile updated', user);
+            }
         });
     });
 });
 
 app.post('/api/profile/avatar', uploadAvatar.single('avatar'), (req, res) => {
     if (!req.file || !req.file.path) return res.status(400).json({ error: 'No image uploaded' });
+    
     const { userId } = req.body;
-    const avatarUrl = req.file.path;
-    db.run('UPDATE users SET avatar_url = ? WHERE id = ?', [avatarUrl, userId], function(err) {
-        res.json({ success: true, avatarUrl });
-        db.get('SELECT id, username, status, avatar_url, bio FROM users WHERE id = ?', [userId], (err, user) => {
-            if (!err && user) io.emit('user profile updated', user);
+    db.run('UPDATE users SET avatar_url = ? WHERE id = ?', [req.file.path, userId], function(err) {
+        res.json({ success: true, avatarUrl: req.file.path });
+        
+        db.get('SELECT id, username, status, avatar_url, bio, club_roles FROM users WHERE id = ?', [userId], (err, user) => {
+            if (!err && user) {
+                user.club_roles = user.club_roles ? JSON.parse(user.club_roles) : [];
+                io.emit('user profile updated', user);
+            }
         });
     });
 });
 
-app.post('/api/messages/image', (req, res) => {
-    uploadAttachment.single('image')(req, res, function (err) {
-        if (err || !req.file) return res.status(500).json({ error: 'Upload error' });
-        res.json({ success: true, imageUrl: req.file.path });
-    });
-});// ===== SECURE SOCKET SETUP & ROUTING =====
+app.post('/api/messages/image', uploadAttachment.single('image'), (req, res) => {
+    if (!req.file) return res.status(500).json({ error: 'Upload error' });
+    res.json({ success: true, imageUrl: req.file.path });
+});// ===== SOCKET LOGIC =====
 const connectedUsers = {};
 const typingUsers = {};
 
 async function startServer() {
     await initializeDatabase();
     await createAdminAccount();
-    server.listen(4000, '0.0.0.0', () => console.log(`🚀 NIC Messenger running securely on port 4000`));
+    server.listen(4000, '0.0.0.0', () => console.log(`🚀 NIC Messenger secure on port 4000`));
     setupSocketIO();
 }
 
@@ -232,11 +274,13 @@ function setupSocketIO() {
         if (!token) return next(new Error('Authentication required'));
         try {
             const decoded = jwt.verify(token, JWT_SECRET);
-            socket.userId = decoded.id;
-            socket.username = decoded.username;
+            socket.userId = decoded.id; 
+            socket.username = decoded.username; 
             socket.role = decoded.role;
             next();
-        } catch (error) { next(new Error('Invalid token')); }
+        } catch (error) { 
+            next(new Error('Invalid token')); 
+        }
     });
 
     io.on('connection', (socket) => {
@@ -246,12 +290,15 @@ function setupSocketIO() {
             if (rows) rows.forEach(r => socket.join(`channel_${r.channel_id}`));
         });
         
-        db.get('SELECT avatar_url, status, bio FROM users WHERE id = ?', [socket.userId], (err, userProfile) => {
+        db.get('SELECT avatar_url, status, bio, club_roles FROM users WHERE id = ?', [socket.userId], (err, u) => {
             connectedUsers[socket.id] = {
-                id: socket.userId, username: socket.username, role: socket.role,
-                avatar_url: userProfile ? userProfile.avatar_url : null,
-                status: userProfile ? userProfile.status : 'Online',
-                bio: userProfile ? userProfile.bio : ''
+                id: socket.userId, 
+                username: socket.username, 
+                role: socket.role,
+                avatar_url: u?.avatar_url || null, 
+                status: u?.status || 'Online', 
+                bio: u?.bio || '',
+                club_roles: u?.club_roles ? JSON.parse(u.club_roles) : []
             };
             io.emit('user list', Object.values(connectedUsers));
         });
@@ -260,7 +307,7 @@ function setupSocketIO() {
             db.all(`
                 SELECT c.*, cm.role 
                 FROM channels c 
-                INNER JOIN channel_members cm ON c.id = cm.channel_id
+                INNER JOIN channel_members cm ON c.id = cm.channel_id 
                 WHERE cm.user_id = ?
             `, [socket.userId], (err, rows) => {
                 if (!err && rows) socket.emit('channel list', rows);
@@ -268,9 +315,9 @@ function setupSocketIO() {
         };
         sendChannelsToClient();
         
-        const executeMessageFetch = (targetRecipientId = null, targetChannelId = null) => {
+        const executeMessageFetch = (targetRecipientId = null, targetChannelId = null, offset = 0) => {
             let query = `
-                SELECT m.*, u.avatar_url,
+                SELECT m.*, u.avatar_url, u.club_roles,
                        GROUP_CONCAT(DISTINCT r.emoji) as reactions, 
                        GROUP_CONCAT(DISTINCT r.user_username) as reaction_users 
                 FROM messages m 
@@ -290,25 +337,33 @@ function setupSocketIO() {
                 query += ` AND m.recipient_id IS NULL AND m.channel_id IS NULL `;
             }
 
-            query += ` GROUP BY m.id ORDER BY m.timestamp ASC LIMIT 100`;
+            query += ` GROUP BY m.id ORDER BY m.timestamp DESC LIMIT 50 OFFSET ?`;
+            params.push(offset);
 
             db.all(query, params, (err, rows) => {
-                if (err) return console.error('❌ Fetch Error:', err);
-                const messages = rows.map(row => ({ 
-                    ...row, reactions: row.reactions ? row.reactions.split(',') : [], reaction_users: row.reaction_users ? row.reaction_users.split(',') : [] 
+                if (err) return;
+                const messages = rows.reverse().map(row => ({ 
+                    ...row, 
+                    club_roles: row.club_roles ? JSON.parse(row.club_roles) : [],
+                    reactions: row.reactions ? row.reactions.split(',') : [], 
+                    reaction_users: row.reaction_users ? row.reaction_users.split(',') : [] 
                 }));
-                socket.emit('previous messages', messages);
+                
+                if (offset === 0) {
+                    socket.emit('previous messages', messages);
+                } else {
+                    socket.emit('older messages', messages);
+                }
             });
         };
 
         const sendMessagesToClient = (targetRecipientId = null, targetChannelId = null) => {
             if (targetChannelId) {
                 db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [targetChannelId, socket.userId], (err, row) => {
-                    if (!row) return socket.emit('error', 'Access Denied: Not a member of this channel.');
-                    executeMessageFetch(targetRecipientId, targetChannelId);
+                    if (row) executeMessageFetch(targetRecipientId, targetChannelId, 0);
                 });
             } else {
-                executeMessageFetch(targetRecipientId, targetChannelId);
+                executeMessageFetch(targetRecipientId, targetChannelId, 0);
             }
         };
 
@@ -318,19 +373,25 @@ function setupSocketIO() {
             sendMessagesToClient(recipientId || null, channelId || null);
         });
 
+        socket.on('fetch older messages', ({ recipientId, channelId, offset }) => {
+            if (channelId) {
+                db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [channelId, socket.userId], (err, row) => {
+                    if (row) executeMessageFetch(recipientId || null, channelId, offset);
+                });
+            } else {
+                executeMessageFetch(recipientId || null, null, offset);
+            }
+        });
+
         socket.on('create channel', (data) => {
             if (socket.role !== 'admin' && socket.username !== 'admin') return; 
-
-            const { name, description, members } = data;
-            const safeName = String(name).trim();
-            if (!safeName) return;
             
+            const { name, description, members } = data;
             db.run('INSERT INTO channels (name, description, is_private, created_by) VALUES (?, ?, 1, ?)', 
-                [safeName, description || '', socket.userId], 
+                [String(name).trim(), description || '', socket.userId], 
                 function(err) {
-                    if (err) return socket.emit('error', 'Failed to create channel');
+                    if (err) return;
                     const newChannelId = this.lastID;
-                    
                     db.run('INSERT INTO channel_members (channel_id, user_id, role) VALUES (?, ?, ?)', [newChannelId, socket.userId, 'admin']);
                     socket.join(`channel_${newChannelId}`);
                     
@@ -350,28 +411,21 @@ function setupSocketIO() {
         socket.on('get channel members', (channelId) => {
             if (socket.role !== 'admin' && socket.username !== 'admin') return;
             db.all('SELECT user_id FROM channel_members WHERE channel_id = ? AND role != ?', [channelId, 'admin'], (err, rows) => {
-                if (!err && rows) {
-                    socket.emit(`channel members ${channelId}`, rows.map(r => r.user_id));
-                }
+                if (!err && rows) socket.emit(`channel members ${channelId}`, rows.map(r => r.user_id));
             });
         });
 
-        // FIXED: Explicitly process the Edit logic and force a global UI sync
         socket.on('edit channel', (data) => {
             if (socket.role !== 'admin' && socket.username !== 'admin') return;
             
             const channelId = Number(data.channelId);
             const safeName = String(data.name).trim();
-            const description = data.description || '';
-            const members = data.members || [];
-            if (!safeName || !channelId) return;
-
-            db.run('UPDATE channels SET name = ?, description = ? WHERE id = ?', [safeName, description, channelId], function(err) {
-                if (err) return console.error(err);
-                
+            
+            db.run('UPDATE channels SET name = ?, description = ? WHERE id = ?', [safeName, data.description || '', channelId], function(err) {
+                if (err) return;
                 db.run('DELETE FROM channel_members WHERE channel_id = ? AND role != ?', [channelId, 'admin'], () => {
-                    if (members.length > 0) {
-                        members.forEach(mId => {
+                    if (data.members.length > 0) {
+                        data.members.forEach(mId => {
                             db.run('INSERT INTO channel_members (channel_id, user_id, role) VALUES (?, ?, ?)', [channelId, mId, 'member'], () => {
                                 io.to(mId.toString()).socketsJoin(`channel_${channelId}`);
                                 io.to(mId.toString()).emit('force channel fetch');
@@ -379,19 +433,16 @@ function setupSocketIO() {
                         });
                     }
                     io.emit('force channel fetch');
-                    io.emit('channel updated', { id: channelId, name: safeName, description: description });
+                    io.emit('channel updated', { id: channelId, name: safeName, description: data.description });
                 });
             });
         });
 
-        // FIXED: Guaranteed multi-stage database cascade deletion
         socket.on('delete channel', (id) => {
             if (socket.role !== 'admin' && socket.username !== 'admin') return;
-            
             const channelId = Number(id);
-            db.run('DELETE FROM channels WHERE id = ?', [channelId], (err) => {
-                if (err) return console.error(err);
-                
+            
+            db.run('DELETE FROM channels WHERE id = ?', [channelId], () => {
                 db.run('DELETE FROM channel_members WHERE channel_id = ?', [channelId], () => {
                     db.run('DELETE FROM messages WHERE channel_id = ?', [channelId], () => {
                         io.in(`channel_${channelId}`).socketsLeave(`channel_${channelId}`);
@@ -403,21 +454,21 @@ function setupSocketIO() {
         });
 
         socket.on('fetch channels', () => sendChannelsToClient());
-
+        
         socket.on('mark read', ({ senderId }) => {
             if (!senderId) return;
             db.run(`UPDATE messages SET is_read = 1 WHERE recipient_id = ? AND user_id = ? AND is_read = 0`, [socket.userId, Number(senderId)], function(err) {
-                    if (!err && this.changes > 0) {
-                        io.to(senderId.toString()).to(socket.userId.toString()).emit('messages read', { readerId: socket.userId, senderId: Number(senderId) });
-                    }
+                if (!err && this.changes > 0) {
+                    io.to(senderId.toString()).to(socket.userId.toString()).emit('messages read', { readerId: socket.userId, senderId: Number(senderId) });
                 }
-            );
+            });
         });
 
         socket.on('typing start', () => { 
             typingUsers[socket.id] = socket.username; 
             socket.broadcast.emit('user typing', { username: socket.username, isTyping: true }); 
         });
+        
         socket.on('typing stop', () => { 
             delete typingUsers[socket.id]; 
             socket.broadcast.emit('user typing', { username: socket.username, isTyping: false }); 
@@ -425,24 +476,27 @@ function setupSocketIO() {
 
         socket.on('chat message', (data) => {
             const safeContent = String(data.content || '').trim();
-            const safeImageUrl = data.imageUrl || null;
-            const recipientId = data.recipientId || null;
-            const channelId = data.channelId || null;
-            if (!safeContent && !safeImageUrl) return;
             const timestamp = new Date().toISOString();
 
             const insertMessage = () => {
                 db.run('INSERT INTO messages (user_id, username, content, timestamp, image_url, recipient_id, channel_id, is_read) VALUES (?, ?, ?, ?, ?, ?, ?, 0)', 
-                    [socket.userId, socket.username, safeContent, timestamp, safeImageUrl, recipientId, channelId], 
+                    [socket.userId, socket.username, safeContent, timestamp, data.imageUrl || null, data.recipientId || null, data.channelId || null], 
                     function(err) {
-                        db.get('SELECT m.*, u.avatar_url FROM messages m LEFT JOIN users u ON m.user_id = u.id WHERE m.id = ?', [this.lastID], (err, msg) => {
+                        db.get('SELECT m.*, u.avatar_url, u.club_roles FROM messages m LEFT JOIN users u ON m.user_id = u.id WHERE m.id = ?', [this.lastID], (err, msg) => {
                             if (err || !msg) return;
-                            const formattedMsg = { ...msg, reactions: [], reaction_users: [], edited: false, is_read: 0 };
+                            const formattedMsg = { 
+                                ...msg, 
+                                club_roles: msg.club_roles ? JSON.parse(msg.club_roles) : [], 
+                                reactions: [], 
+                                reaction_users: [], 
+                                edited: false, 
+                                is_read: 0 
+                            };
                             
-                            if (recipientId) {
-                                io.to(recipientId.toString()).to(socket.userId.toString()).emit('chat message', formattedMsg);
-                            } else if (channelId) {
-                                io.to(`channel_${channelId}`).emit('chat message', formattedMsg);
+                            if (data.recipientId) {
+                                io.to(data.recipientId.toString()).to(socket.userId.toString()).emit('chat message', formattedMsg);
+                            } else if (data.channelId) {
+                                io.to(`channel_${data.channelId}`).emit('chat message', formattedMsg);
                             } else {
                                 io.emit('chat message', formattedMsg);
                             }
@@ -451,34 +505,38 @@ function setupSocketIO() {
                 );
             };
 
-            if (channelId) {
-                db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [channelId, socket.userId], (err, row) => {
-                    if (!row) return; 
-                    insertMessage();
+            if (data.channelId) {
+                db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [data.channelId, socket.userId], (err, row) => { 
+                    if (row) insertMessage(); 
                 });
             } else {
                 insertMessage();
             }
         });
 
-        socket.on('reply to message', ({ messageId, content, replyToUsername, replyToContent, recipientId, channelId }) => {
-            const safeContent = String(content || '').trim();
-            if (!safeContent) return;
-            const targetId = Number(messageId);
+        socket.on('reply to message', (data) => {
+            const safeContent = String(data.content || '').trim();
             const timestamp = new Date().toISOString();
             
             const insertReply = () => {
                 db.run('INSERT INTO messages (user_id, username, content, timestamp, reply_to, reply_to_username, reply_to_content, recipient_id, channel_id, is_read) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)',
-                    [socket.userId, socket.username, safeContent, timestamp, targetId, replyToUsername || '', replyToContent || '', recipientId || null, channelId || null],
+                    [socket.userId, socket.username, safeContent, timestamp, Number(data.messageId), data.replyToUsername || '', data.replyToContent || '', data.recipientId || null, data.channelId || null],
                     function(err) {
-                        db.get('SELECT m.*, u.avatar_url FROM messages m LEFT JOIN users u ON m.user_id = u.id WHERE m.id = ?', [this.lastID], (err, msg) => {
+                        db.get('SELECT m.*, u.avatar_url, u.club_roles FROM messages m LEFT JOIN users u ON m.user_id = u.id WHERE m.id = ?', [this.lastID], (err, msg) => {
                             if (err || !msg) return;
-                            const formattedMsg = { ...msg, reactions: [], reaction_users: [], edited: false, is_read: 0 };
+                            const formattedMsg = { 
+                                ...msg, 
+                                club_roles: msg.club_roles ? JSON.parse(msg.club_roles) : [], 
+                                reactions: [], 
+                                reaction_users: [], 
+                                edited: false, 
+                                is_read: 0 
+                            };
                             
-                            if (recipientId) {
-                                io.to(recipientId.toString()).to(socket.userId.toString()).emit('chat message', formattedMsg);
-                            } else if (channelId) {
-                                io.to(`channel_${channelId}`).emit('chat message', formattedMsg);
+                            if (data.recipientId) {
+                                io.to(data.recipientId.toString()).to(socket.userId.toString()).emit('chat message', formattedMsg);
+                            } else if (data.channelId) {
+                                io.to(`channel_${data.channelId}`).emit('chat message', formattedMsg);
                             } else {
                                 io.emit('chat message', formattedMsg);
                             }
@@ -487,10 +545,9 @@ function setupSocketIO() {
                 );
             };
 
-            if (channelId) {
-                db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [channelId, socket.userId], (err, row) => {
-                    if (!row) return; 
-                    insertReply();
+            if (data.channelId) {
+                db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [data.channelId, socket.userId], (err, row) => { 
+                    if (row) insertReply(); 
                 });
             } else {
                 insertReply();
@@ -502,9 +559,7 @@ function setupSocketIO() {
             const safeContent = String(content || '').trim();
             db.get('SELECT * FROM messages WHERE id = ?', [targetId], (err, message) => {
                 if (err || !message) return;
-                const isAdmin = socket.role === 'admin';
-                const isOwner = Number(message.user_id) === Number(socket.userId);
-                if (!isAdmin && !isOwner) return;
+                if (socket.role !== 'admin' && Number(message.user_id) !== Number(socket.userId)) return;
 
                 db.run('UPDATE messages SET content = ?, edited = 1 WHERE id = ?', [safeContent, targetId], function(err) {
                     if (!err && this.changes > 0) {
@@ -525,29 +580,22 @@ function setupSocketIO() {
             const targetId = Number(messageId);
             db.get('SELECT * FROM messages WHERE id = ?', [targetId], (err, message) => {
                 if (err || !message) return;
-                const isAdmin = socket.role === 'admin';
-                const isOwner = Number(message.user_id) === Number(socket.userId);
-                if (!isAdmin && !isOwner) return;
+                if (socket.role !== 'admin' && Number(message.user_id) !== Number(socket.userId)) return;
 
-                db.run('UPDATE messages SET content = ?, image_url = NULL, is_deleted = 1, deleted_by = ? WHERE id = ?', 
-                    ['This message was deleted', socket.username, targetId], 
-                    function(err) {
-                        if (!err && this.changes > 0) {
-                            db.run('DELETE FROM reactions WHERE message_id = ?', [targetId]);
-                            db.get('SELECT * FROM messages WHERE id = ?', [targetId], (err, row) => {
-                                if (err || !row) return;
-                                const payload = { messageId: targetId, content: row.content, deleted_by: row.deleted_by, is_deleted: row.is_deleted };
-                                if (message.recipient_id) {
-                                    io.to(message.recipient_id.toString()).to(message.user_id.toString()).emit('message deleted', payload);
-                                } else if (message.channel_id) {
-                                    io.to(`channel_${message.channel_id}`).emit('message deleted', payload);
-                                } else {
-                                    io.emit('message deleted', payload);
-                                }
-                            });
+                db.run('UPDATE messages SET content = ?, image_url = NULL, is_deleted = 1, deleted_by = ? WHERE id = ?', ['This message was deleted', socket.username, targetId], function(err) {
+                    if (!err && this.changes > 0) {
+                        db.run('DELETE FROM reactions WHERE message_id = ?', [targetId]);
+                        const payload = { messageId: targetId, content: 'This message was deleted', deleted_by: socket.username, is_deleted: 1 };
+                        
+                        if (message.recipient_id) {
+                            io.to(message.recipient_id.toString()).to(message.user_id.toString()).emit('message deleted', payload);
+                        } else if (message.channel_id) {
+                            io.to(`channel_${message.channel_id}`).emit('message deleted', payload);
+                        } else {
+                            io.emit('message deleted', payload);
                         }
                     }
-                );
+                });
             });
         });
 
@@ -569,6 +617,7 @@ function setupSocketIO() {
             db.all('SELECT emoji, user_username FROM reactions WHERE message_id = ?', [messageId], (err, rows) => {
                 if (!err) {
                     const payload = { messageId: messageId, reactions: rows.map(r => r.emoji), reactionUsers: rows.map(r => r.user_username) };
+                    
                     if (msgRow.recipient_id) {
                         io.to(msgRow.recipient_id.toString()).to(msgRow.user_id.toString()).emit('message reaction', payload);
                     } else if (msgRow.channel_id) {
@@ -581,11 +630,14 @@ function setupSocketIO() {
         }
 
         socket.on('kick user', (targetUsername) => {
-            if (socket.role !== 'admin') return;
+            if (socket.role !== 'admin' && socket.username !== 'admin') return;
             const target = Object.entries(connectedUsers).find(([_, user]) => user.username === targetUsername);
             if (target) {
                 const targetSocket = io.sockets.sockets.get(target[0]);
-                if (targetSocket) { targetSocket.emit('kicked', 'You were removed by an admin.'); targetSocket.disconnect(true); }
+                if (targetSocket) { 
+                    targetSocket.emit('kicked', 'You were removed by an admin.'); 
+                    targetSocket.disconnect(true); 
+                }
                 delete connectedUsers[target[0]];
                 io.emit('user list', Object.values(connectedUsers));
             }
