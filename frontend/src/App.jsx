@@ -32,6 +32,7 @@ function App() {
   const [userId, setUserId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
+  const [channels, setChannels] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [token, setToken] = useState(null);
@@ -39,21 +40,24 @@ function App() {
   
   const [activeChat, setActiveChat] = useState(null);
   const [unreadCounts, setUnreadCounts] = useState({});
-  
-  // Upgraded Theme Engine: Supports 'light', 'dark', and 'black'
   const [theme, setTheme] = useState(localStorage.getItem('nic_theme') || 'dark');
+  
+  // NEW: Pagination State
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [isFetchingHistory, setIsFetchingHistory] = useState(false);
   
   const activeChatRef = useRef(null);
   const userIdRef = useRef(null);
   const usernameRef = useRef(null);
   const usersRef = useRef([]);
+  const channelsRef = useRef([]);
   const socketRef = useRef(null);
 
   useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
   useEffect(() => { userIdRef.current = userId; usernameRef.current = username; }, [userId, username]);
   useEffect(() => { usersRef.current = users; }, [users]);
+  useEffect(() => { channelsRef.current = channels; }, [channels]);
 
-  // Sync theme with Tailwind and LocalStorage
   useEffect(() => {
     localStorage.setItem('nic_theme', theme);
     if (theme === 'dark' || theme === 'black') {
@@ -99,29 +103,67 @@ function App() {
 
       socket.on('connect', () => setIsConnected(true));
       socket.on('disconnect', () => setIsConnected(false));
-      socket.on('previous messages', (msgs) => setMessages(msgs));
+      
+      // FIXED: Handles the initial 50 messages
+      socket.on('previous messages', (msgs) => {
+          setMessages(msgs);
+          setHasMoreMessages(msgs.length === 50); // If less than 50, we hit the beginning of time
+      });
+
+      // NEW: Handles the older chunks, prepending them to the array safely
+      socket.on('older messages', (msgs) => {
+          setMessages(prev => [...msgs, ...prev]);
+          setHasMoreMessages(msgs.length === 50);
+          setIsFetchingHistory(false);
+      });
+      
+      socket.on('channel list', (data) => setChannels(data));
+      socket.on('force channel fetch', () => socket.emit('fetch channels'));
+
+      socket.on('channel deleted', (channelId) => {
+          const numId = Number(channelId);
+          setChannels(prev => prev.filter(c => c.id !== numId));
+          if (activeChatRef.current?.isChannel && activeChatRef.current?.id === numId) {
+              changeChat(null, false);
+          }
+      });
+
+      socket.on('channel updated', (updatedChannel) => {
+          const numId = Number(updatedChannel.id);
+          setChannels(prev => prev.map(c => c.id === numId ? { ...c, name: updatedChannel.name, description: updatedChannel.description } : c));
+          if (activeChatRef.current?.isChannel && activeChatRef.current?.id === numId) {
+              setActiveChat(prev => ({ ...prev, name: updatedChannel.name, description: updatedChannel.description }));
+          }
+      });
       
       socket.on('chat message', (msg) => {
-        const isGeneralMsg = !msg.recipient_id;
+        const isGeneralMsg = !msg.recipient_id && !msg.channel_id;
         const currentActiveId = activeChatRef.current?.id || null;
+        const isCurrentlyChannel = activeChatRef.current?.isChannel || false;
         const myId = Number(userIdRef.current);
         const msgUserId = Number(msg.user_id);
+        const channelId = msg.channel_id ? Number(msg.channel_id) : null;
         const myUsername = usernameRef.current;
         
         let belongsToActive = false;
-        if (isGeneralMsg && currentActiveId === null) {
+        
+        if (isGeneralMsg && currentActiveId === null && !isCurrentlyChannel) {
           belongsToActive = true;
-        } else if (!isGeneralMsg) {
-          belongsToActive = (msgUserId === currentActiveId) || (Number(msg.recipient_id) === currentActiveId);
+        } else if (channelId) {
+          belongsToActive = (currentActiveId === channelId) && isCurrentlyChannel;
+        } else if (!isGeneralMsg && !channelId) {
+          belongsToActive = !isCurrentlyChannel && ((msgUserId === currentActiveId) || (Number(msg.recipient_id) === currentActiveId));
         }
 
         if (belongsToActive) {
           setMessages(prev => [...prev, msg]);
-          if (!isGeneralMsg && msgUserId !== myId) {
+          if (!isGeneralMsg && !channelId && msgUserId !== myId) {
             socket.emit('mark read', { senderId: msgUserId });
           }
         } else {
-          if (isGeneralMsg) {
+          if (channelId) {
+             setUnreadCounts(counts => ({ ...counts, [`channel_${channelId}`]: (counts[`channel_${channelId}`] || 0) + 1 }));
+          } else if (isGeneralMsg) {
              setUnreadCounts(counts => ({ ...counts, 'general': (counts['general'] || 0) + 1 }));
           } else if (msgUserId !== myId) {
              setUnreadCounts(counts => ({ ...counts, [msgUserId]: (counts[msgUserId] || 0) + 1 }));
@@ -136,22 +178,29 @@ function App() {
             playChime();
 
             if ('Notification' in window && Notification.permission === 'granted' && (isTabHidden || !belongsToActive)) {
-              const title = isGeneralMsg ? `#general (${msg.username})` : `DM from ${msg.username}`;
+              let title = `DM from ${msg.username}`;
+              if (channelId) {
+                  const cName = channelsRef.current.find(c => c.id === channelId)?.name || 'channel';
+                  title = `#${cName} (${msg.username})`;
+              } else if (isGeneralMsg) {
+                  title = `#general (${msg.username})`;
+              }
+
               const body = msg.content ? msg.content : 'Sent an attachment';
+              const notifTag = channelId ? `channel-${channelId}` : isGeneralMsg ? 'general' : `dm-${msgUserId}`;
               
-              const notif = new Notification(title, {
-                body,
-                icon: msg.avatar_url || undefined,
-                tag: isGeneralMsg ? 'general' : `dm-${msgUserId}`
-              });
+              const notif = new Notification(title, { body, icon: msg.avatar_url || undefined, tag: notifTag });
 
               notif.onclick = () => {
                 window.focus();
-                if (isGeneralMsg) {
+                if (channelId) {
+                  const targetChannel = channelsRef.current.find(c => c.id === channelId);
+                  if (targetChannel) changeChat(targetChannel, true);
+                } else if (isGeneralMsg) {
                   changeChat(null);
                 } else {
                   const targetUser = usersRef.current.find(u => Number(u.id) === msgUserId) || { id: msgUserId, username: msg.username };
-                  changeChat(targetUser);
+                  changeChat(targetUser, false);
                 }
                 notif.close();
               };
@@ -162,38 +211,21 @@ function App() {
 
       socket.on('messages read', ({ readerId, senderId }) => {
         setMessages(prev => prev.map(m => {
-          if (Number(m.recipient_id) === Number(readerId) && Number(m.user_id) === Number(senderId)) {
-            return { ...m, is_read: 1 };
-          }
+          if (Number(m.recipient_id) === Number(readerId) && Number(m.user_id) === Number(senderId)) return { ...m, is_read: 1 };
           return m;
         }));
       });
 
       socket.on('message reaction', (data) => {
-        setMessages(prev => prev.map(msg => {
-          if (msg.id === data.messageId) {
-            return { ...msg, reactions: data.reactions, reaction_users: data.reactionUsers };
-          }
-          return msg;
-        }));
+        setMessages(prev => prev.map(msg => msg.id === data.messageId ? { ...msg, reactions: data.reactions, reaction_users: data.reactionUsers } : msg));
       });
 
       socket.on('message edited', (data) => {
-        setMessages(prev => prev.map(msg => {
-          if (msg.id === data.messageId) {
-            return { ...msg, content: data.content, edited: true };
-          }
-          return msg;
-        }));
+        setMessages(prev => prev.map(msg => msg.id === data.messageId ? { ...msg, content: data.content, edited: true } : msg));
       });
 
       socket.on('message deleted', (data) => {
-        setMessages(prev => prev.map(msg => {
-          if (msg.id === data.messageId) {
-            return { ...msg, content: data.content, image_url: null, is_deleted: true, deleted_by: data.deleted_by, reactions: [], reaction_users: [] };
-          }
-          return msg;
-        }));
+        setMessages(prev => prev.map(msg => msg.id === data.messageId ? { ...msg, content: data.content, image_url: null, is_deleted: true, deleted_by: data.deleted_by, reactions: [], reaction_users: [] } : msg));
       });
 
       socket.on('user list', (userList) => setUsers(userList));
@@ -201,17 +233,13 @@ function App() {
       socket.on('user typing', (data) => {
         setUsers(prev => {
           const updated = prev.map(user => user.username === data.username ? { ...user, isTyping: data.isTyping } : user);
-          if (data.isTyping && !prev.find(u => u.username === data.username)) {
-            return [...prev, { username: data.username, isTyping: true, role: 'user' }];
-          }
+          if (data.isTyping && !prev.find(u => u.username === data.username)) return [...prev, { username: data.username, isTyping: true, role: 'user' }];
           return updated;
         });
       });
 
       socket.on('system message', (msg) => {
-        if (activeChatRef.current === null) {
-          setMessages(prev => [...prev, { username: 'System', content: msg, timestamp: new Date().toISOString(), isSystem: true }]);
-        }
+        if (activeChatRef.current === null) setMessages(prev => [...prev, { username: 'System', content: msg, timestamp: new Date().toISOString(), isSystem: true }]);
       });
 
       socket.on('error', (error) => alert(`Error: ${error}`));
@@ -255,6 +283,7 @@ function App() {
     setUserId(null);
     setMessages([]);
     setUsers([]);
+    setChannels([]);
     setActiveChat(null);
     setUnreadCounts({});
     setIsConnected(false);
@@ -264,10 +293,13 @@ function App() {
     }
   };
 
-  const changeChat = (chatUser) => {
-    setActiveChat(chatUser);
+  const changeChat = (target, isChannel = false) => {
+    setActiveChat(target ? { ...target, isChannel } : null);
     setMessages([]); 
-    const chatKey = chatUser ? chatUser.id : 'general';
+    setHasMoreMessages(true); // Reset pagination flags when changing rooms
+    setIsFetchingHistory(false);
+    
+    const chatKey = target ? (isChannel ? `channel_${target.id}` : target.id) : 'general';
     setUnreadCounts(prev => {
        const newCounts = { ...prev };
        delete newCounts[chatKey];
@@ -275,56 +307,92 @@ function App() {
     });
 
     if (socketRef.current && isConnected) {
-      socketRef.current.emit('switch chat', chatUser ? chatUser.id : null);
-      if (chatUser && chatUser.id) {
-        socketRef.current.emit('mark read', { senderId: chatUser.id });
+      const payload = isChannel ? { channelId: target.id } : { recipientId: target ? target.id : null };
+      socketRef.current.emit('switch chat', payload);
+      
+      if (!isChannel && target && target.id) {
+        socketRef.current.emit('mark read', { senderId: target.id });
       }
     }
   };
 
+  // NEW: Emit the fetch command for the intersection observer
+  const fetchOlderMessages = (offset) => {
+      if (socketRef.current && isConnected && hasMoreMessages && !isFetchingHistory) {
+          setIsFetchingHistory(true);
+          const payload = { offset };
+          if (activeChat?.isChannel) {
+              payload.channelId = activeChat.id;
+          } else {
+              payload.recipientId = activeChat ? activeChat.id : null;
+          }
+          socketRef.current.emit('fetch older messages', payload);
+      }
+  };
+
+  const createChannel = (channelData) => {
+    if (socketRef.current && isConnected) socketRef.current.emit('create channel', channelData);
+  };
+
+  const editChannel = (channelData) => {
+    if (socketRef.current && isConnected) socketRef.current.emit('edit channel', channelData);
+  };
+
+  const deleteChannel = (channelId) => {
+    if (socketRef.current && isConnected) socketRef.current.emit('delete channel', channelId);
+  };
+
+  const getChannelMembers = (channelId, callback) => {
+      if (socketRef.current && isConnected) {
+          socketRef.current.emit('get channel members', channelId);
+          socketRef.current.once(`channel members ${channelId}`, (members) => {
+              callback(members);
+          });
+      }
+  };
+
   const sendMessage = (data) => {
     if (socketRef.current && isConnected) {
-      socketRef.current.emit('chat message', { ...data, recipientId: activeChat ? activeChat.id : null });
+      const payload = { ...data };
+      if (activeChat?.isChannel) {
+          payload.channelId = activeChat.id;
+      } else {
+          payload.recipientId = activeChat ? activeChat.id : null;
+      }
+      socketRef.current.emit('chat message', payload);
     }
   };
 
   const sendTyping = (isTyping) => {
-    if (socketRef.current && isConnected) {
-      socketRef.current.emit(isTyping ? 'typing start' : 'typing stop');
-    }
+    if (socketRef.current && isConnected) socketRef.current.emit(isTyping ? 'typing start' : 'typing stop');
   };
 
   const addReaction = (messageId, emoji) => {
-    if (socketRef.current && isConnected) {
-      socketRef.current.emit('add reaction', { messageId, emoji });
-    }
+    if (socketRef.current && isConnected) socketRef.current.emit('add reaction', { messageId, emoji });
   };
 
   const replyToMessage = (messageId, content, replyToUsername, replyToContent) => {
     if (socketRef.current && isConnected && content.trim()) {
-      socketRef.current.emit('reply to message', { 
-        messageId, content, replyToUsername, replyToContent, 
-        recipientId: activeChat ? activeChat.id : null 
-      });
+      const payload = { messageId, content, replyToUsername, replyToContent };
+      if (activeChat?.isChannel) {
+          payload.channelId = activeChat.id;
+      } else {
+          payload.recipientId = activeChat ? activeChat.id : null;
+      }
+      socketRef.current.emit('reply to message', payload);
     }
   };
 
   const editMessage = (messageId, content) => {
-    if (socketRef.current && isConnected) {
-      socketRef.current.emit('edit message', { messageId, content });
-    }
+    if (socketRef.current && isConnected) socketRef.current.emit('edit message', { messageId, content });
   };
 
   const handleKick = (targetUsername) => {
-    if (socketRef.current && isConnected && userRole === 'admin') {
-      socketRef.current.emit('kick user', targetUsername);
-    }
+    if (socketRef.current && isConnected && userRole === 'admin') socketRef.current.emit('kick user', targetUsername);
   };
 
   const handleDeleteMessage = (messageId) => {
-    if (socketRef.current && isConnected) {
-      socketRef.current.emit('delete message', messageId);
-    }
+    if (socketRef.current && isConnected) socketRef.current.emit('delete message', messageId);
   };
 
   if (isLoading) {
@@ -338,7 +406,6 @@ function App() {
     );
   }
 
-  // Dynamic background mapping
   const appBg = theme === 'black' ? 'bg-black' : 'bg-slate-50 dark:bg-slate-950';
 
   return (
@@ -347,13 +414,15 @@ function App() {
         <Route path="/login" element={username ? <Navigate to="/chat" replace /> : <Login onLogin={handleLogin} error={loginError} />} />
         <Route path="/chat" element={username ? (
             <Chat 
-              messages={messages} users={users} sendMessage={sendMessage} 
+              messages={messages} users={users} channels={channels} sendMessage={sendMessage} 
               username={username} userRole={userRole} userId={userId}
               isConnected={isConnected} onKick={handleKick} onDeleteMessage={handleDeleteMessage}
               onLogout={handleLogout} sendTyping={sendTyping} addReaction={addReaction}
-              replyToMessage={replyToMessage} editMessage={editMessage}
+              replyToMessage={replyToMessage} editMessage={editMessage} 
+              createChannel={createChannel} editChannel={editChannel} deleteChannel={deleteChannel} getChannelMembers={getChannelMembers}
               activeChat={activeChat} changeChat={changeChat} unreadCounts={unreadCounts}
               theme={theme} setTheme={setTheme}
+              fetchOlderMessages={fetchOlderMessages} hasMoreMessages={hasMoreMessages} isFetchingHistory={isFetchingHistory} // NEW PROPS
             />
           ) : <Navigate to="/login" replace />} 
         />

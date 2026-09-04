@@ -1,10 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 
-function MessageList({ messages = [], currentUser, socket, onReply, onEdit, searchQuery = '', theme }) {
+function MessageList({ messages = [], currentUser, socket, onReply, onEdit, searchQuery = '', theme, fetchOlderMessages, hasMoreMessages, isFetchingHistory }) {
     const [hoveredMessage, setHoveredMessage] = useState(null);
     const [showReactionPicker, setShowReactionPicker] = useState(null);
 
     const QUICK_EMOJIS = ['👍', '👎', '❤️', '😂', '😭', '🥺', '🤯', '🔥', '✨', '💯', '🚀', '👀'];
+
+    // FIXED: Intersection Observer attached to the invisible sensor div
+    const observer = useRef();
+    const topElementRef = useCallback(node => {
+        if (isFetchingHistory || !hasMoreMessages || searchQuery) return;
+        if (observer.current) observer.current.disconnect();
+        observer.current = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting) {
+                fetchOlderMessages(messages.length);
+            }
+        });
+        if (node) observer.current.observe(node);
+    }, [isFetchingHistory, hasMoreMessages, messages.length, fetchOlderMessages, searchQuery]);
 
     const formatDateLabel = (dateString) => {
         const date = new Date(dateString || Date.now());
@@ -69,6 +82,17 @@ function MessageList({ messages = [], currentUser, socket, onReply, onEdit, sear
         Number(m.user_id) === Number(currentUser?.id) && m.recipient_id && (m.is_read === 1 || m.is_read === true)
     );return (
         <div className="flex flex-col space-y-6 pb-4">
+            {/* FIXED: The Infinite Scroll Target Sensor */}
+            {hasMoreMessages && !searchQuery && (
+                <div ref={topElementRef} className="w-full flex justify-center py-2 h-8">
+                    {isFetchingHistory ? (
+                        <span className={`text-[10px] font-bold uppercase tracking-widest animate-pulse ${theme === 'black' ? 'text-cyan-600' : 'text-indigo-400'}`}>Decrypting Archives...</span>
+                    ) : (
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-transparent">Load Trigger</span>
+                    )}
+                </div>
+            )}
+
             {Object.keys(groupedMessages).map((dateLabel) => (
                 <div key={dateLabel} className="flex flex-col space-y-4">
                     <div className="flex items-center justify-center my-6 relative">
@@ -174,7 +198,7 @@ function MessageList({ messages = [], currentUser, socket, onReply, onEdit, sear
                                                 
                                                 {(msg.edited === 1 || msg.edited === true) && !msg.is_deleted && (
                                                     <div className="flex justify-end mt-1">
-                                                        <span className="text-[10px] opacity-50 font-bold uppercase tracking-wider">(edited)</span>
+                                                        <span className="text-[9px] opacity-50 font-bold uppercase tracking-wider">(edited)</span>
                                                     </div>
                                                 )}
                                             </div>
