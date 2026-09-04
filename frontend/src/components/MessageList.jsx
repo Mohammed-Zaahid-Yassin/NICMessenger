@@ -1,29 +1,34 @@
 import React, { useState, useRef, useCallback } from 'react';
 
-function MessageList({ messages = [], currentUser, socket, onReply, onEdit, searchQuery = '', theme, fetchOlderMessages, hasMoreMessages, isFetchingHistory }) {
+function MessageList({ 
+    messages = [], currentUser, socket, onReply, onEdit, 
+    searchQuery = '', theme, fetchOlderMessages, hasMoreMessages, isFetchingHistory 
+}) {
     const [hoveredMessage, setHoveredMessage] = useState(null);
     const [showReactionPicker, setShowReactionPicker] = useState(null);
 
     const QUICK_EMOJIS = ['👍', '👎', '❤️', '😂', '😭', '🥺', '🤯', '🔥', '✨', '💯', '🚀', '👀'];
 
-    // FIXED: Intersection Observer attached to the invisible sensor div
     const observer = useRef();
     const topElementRef = useCallback(node => {
         if (isFetchingHistory || !hasMoreMessages || searchQuery) return;
         if (observer.current) observer.current.disconnect();
+        
         observer.current = new IntersectionObserver(entries => {
             if (entries[0].isIntersecting) {
                 fetchOlderMessages(messages.length);
             }
         });
+        
         if (node) observer.current.observe(node);
     }, [isFetchingHistory, hasMoreMessages, messages.length, fetchOlderMessages, searchQuery]);
 
     const formatDateLabel = (dateString) => {
         const date = new Date(dateString || Date.now());
-        const today = new Date();
-        const yesterday = new Date(today);
+        const today = new Date(); 
+        const yesterday = new Date(today); 
         yesterday.setDate(yesterday.getDate() - 1);
+        
         if (date.toDateString() === today.toDateString()) return 'Today';
         if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
         return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
@@ -42,7 +47,9 @@ function MessageList({ messages = [], currentUser, socket, onReply, onEdit, sear
             .replace(/</g, "&lt;").replace(/>/g, "&gt;")
             .replace(/@(\w+)/g, (match, username) => {
                 const isMe = username === currentUser.username;
-                const mentionClass = theme === 'black' ? 'text-cyan-400 font-bold drop-shadow-[0_0_2px_rgba(6,182,212,0.8)]' : (isMe ? 'text-white underline decoration-white/50 underline-offset-2' : 'text-indigo-500 dark:text-indigo-400 font-bold');
+                const mentionClass = theme === 'black' 
+                    ? 'text-cyan-400 font-bold drop-shadow-[0_0_2px_rgba(6,182,212,0.8)]' 
+                    : (isMe ? 'text-white underline decoration-white/50 underline-offset-2' : 'text-indigo-500 dark:text-indigo-400 font-bold');
                 return `<span class="${mentionClass} cursor-pointer">${match}</span>`;
             })
             .replace(/`(.*?)`/g, `<code class="px-1.5 py-0.5 rounded text-[11px] font-mono font-bold ${theme === 'black' ? 'bg-[#1a1a1a] text-emerald-400 border border-[#333]' : 'bg-slate-100 dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 border border-slate-200 dark:border-slate-700'}">$1</code>`)
@@ -57,13 +64,15 @@ function MessageList({ messages = [], currentUser, socket, onReply, onEdit, sear
         return <span dangerouslySetInnerHTML={{ __html: htmlText }} />;
     };
 
-    const handleAddReaction = (messageId, emoji) => {
-        socket.emit('add reaction', { messageId, emoji });
-        setShowReactionPicker(null);
+    const handleAddReaction = (messageId, emoji) => { 
+        socket.emit('add reaction', { messageId, emoji }); 
+        setShowReactionPicker(null); 
     };
-
-    const handleDelete = (messageId) => {
-        if (window.confirm("Purge this data log?")) socket.emit('delete message', messageId);
+    
+    const handleDelete = (messageId) => { 
+        if (window.confirm("Purge this data log?")) {
+            socket.emit('delete message', messageId);
+        }
     };
 
     const groupReactions = (emojisArray, usersArray) => {
@@ -82,13 +91,17 @@ function MessageList({ messages = [], currentUser, socket, onReply, onEdit, sear
         Number(m.user_id) === Number(currentUser?.id) && m.recipient_id && (m.is_read === 1 || m.is_read === true)
     );return (
         <div className="flex flex-col space-y-6 pb-4">
-            {/* FIXED: The Infinite Scroll Target Sensor */}
+            
             {hasMoreMessages && !searchQuery && (
                 <div ref={topElementRef} className="w-full flex justify-center py-2 h-8">
                     {isFetchingHistory ? (
-                        <span className={`text-[10px] font-bold uppercase tracking-widest animate-pulse ${theme === 'black' ? 'text-cyan-600' : 'text-indigo-400'}`}>Decrypting Archives...</span>
+                        <span className={`text-[10px] font-bold uppercase tracking-widest animate-pulse ${theme === 'black' ? 'text-cyan-600' : 'text-indigo-400'}`}>
+                            Decrypting Archives...
+                        </span>
                     ) : (
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-transparent">Load Trigger</span>
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-transparent">
+                            Load Trigger
+                        </span>
                     )}
                 </div>
             )}
@@ -96,7 +109,9 @@ function MessageList({ messages = [], currentUser, socket, onReply, onEdit, sear
             {Object.keys(groupedMessages).map((dateLabel) => (
                 <div key={dateLabel} className="flex flex-col space-y-4">
                     <div className="flex items-center justify-center my-6 relative">
-                        <div className="absolute inset-0 flex items-center"><div className={`w-full h-px ${theme === 'black' ? 'bg-[#1a1a1a]' : 'bg-slate-200 dark:bg-slate-800'}`}></div></div>
+                        <div className="absolute inset-0 flex items-center">
+                            <div className={`w-full h-px ${theme === 'black' ? 'bg-[#1a1a1a]' : 'bg-slate-200 dark:bg-slate-800'}`}></div>
+                        </div>
                         <div className={`relative px-4 text-[10px] font-bold uppercase tracking-[0.2em] rounded-full backdrop-blur-md ${theme === 'black' ? 'bg-[#000] text-gray-600 border border-[#1a1a1a]' : 'bg-slate-50 dark:bg-[#0f172a] text-slate-400 dark:text-slate-500 border border-transparent'}`}>
                             {dateLabel}
                         </div>
@@ -112,8 +127,8 @@ function MessageList({ messages = [], currentUser, socket, onReply, onEdit, sear
                         return (
                             <div key={msg.id || msg.timestamp} className="flex flex-col">
                                 <div 
-                                    className={`flex gap-4 group ${isMyMessage ? 'flex-row-reverse' : ''}`}
-                                    onMouseEnter={() => setHoveredMessage(msg.id)}
+                                    className={`flex gap-4 group ${isMyMessage ? 'flex-row-reverse' : ''}`} 
+                                    onMouseEnter={() => setHoveredMessage(msg.id)} 
                                     onMouseLeave={() => { setHoveredMessage(null); setShowReactionPicker(null); }}
                                 >
                                     <div className="flex-shrink-0 mt-auto mb-1">
@@ -125,14 +140,30 @@ function MessageList({ messages = [], currentUser, socket, onReply, onEdit, sear
                                             </div>
                                         )}
                                     </div>
+                                    
                                     <div className={`flex flex-col max-w-[75%] ${isMyMessage ? 'items-end' : 'items-start'}`}>
-                                        <div className="flex items-baseline gap-2 mb-1 px-1">
-                                            <span className={`font-bold text-[13px] tracking-wide ${isMyMessage ? (theme === 'black' ? 'text-cyan-500 drop-shadow-[0_0_5px_rgba(6,182,212,0.6)]' : 'text-indigo-500 dark:text-indigo-400') : (theme === 'black' ? 'text-gray-300' : 'text-slate-700 dark:text-slate-300')}`}>
-                                                {msg.username}
-                                            </span>
-                                            <span className={`text-[9px] font-mono font-medium ${theme === 'black' ? 'text-gray-600' : 'text-slate-400 dark:text-slate-500'}`}>
-                                                {new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                            </span>
+                                        
+                                        {/* Name and Tags Header (Stacked vertically like WhatsApp) */}
+                                        <div className={`flex flex-col mb-1 px-1 ${isMyMessage ? 'items-end' : 'items-start'}`}>
+                                            <div className={`flex items-baseline gap-2 flex-wrap ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
+                                                <span className={`font-bold text-[13px] tracking-wide ${isMyMessage ? (theme === 'black' ? 'text-cyan-500 drop-shadow-[0_0_5px_rgba(6,182,212,0.6)]' : 'text-indigo-500 dark:text-indigo-400') : (theme === 'black' ? 'text-gray-300' : 'text-slate-700 dark:text-slate-300')}`}>
+                                                    {msg.username}
+                                                </span>
+                                                <span className={`text-[9px] font-mono font-medium ${theme === 'black' ? 'text-gray-600' : 'text-slate-400 dark:text-slate-500'}`}>
+                                                    {new Date(msg.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </span>
+                                            </div>
+
+                                            {/* Render Dynamic Club Tags as gray subtext */}
+                                            {!msg.isSystem && msg.club_roles && Array.isArray(msg.club_roles) && msg.club_roles.length > 0 && (
+                                                <span className={`text-[10.5px] font-medium leading-tight mt-0.5 ${theme === 'black' ? 'text-gray-500' : 'text-slate-500 dark:text-slate-400'}`}>
+                                                    {msg.club_roles.map((role) => {
+                                                        // Simplify titles for Executives and Operations to avoid clunky text
+                                                        if (role.team === 'Executive Board' || role.team === 'Operations') return role.post;
+                                                        return `${role.team} ${role.post}`;
+                                                    }).join(', ')}
+                                                </span>
+                                            )}
                                         </div>
 
                                         <div className="relative flex items-center">
@@ -154,11 +185,9 @@ function MessageList({ messages = [], currentUser, socket, onReply, onEdit, sear
                                                             </div>
                                                         )}
                                                     </div>
-
                                                     <button onClick={() => onReply(msg)} className={`p-1.5 rounded-lg transition-colors ${theme === 'black' ? 'text-gray-400 hover:text-cyan-400 hover:bg-[#1a1a1a]' : 'text-slate-400 hover:text-indigo-500 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>
                                                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" /></svg>
                                                     </button>
-
                                                     {canModify && (
                                                         <>
                                                             <button onClick={() => onEdit(msg)} className={`p-1.5 rounded-lg transition-colors ${theme === 'black' ? 'text-gray-400 hover:text-emerald-400 hover:bg-[#1a1a1a]' : 'text-slate-400 hover:text-emerald-500 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>
@@ -207,7 +236,12 @@ function MessageList({ messages = [], currentUser, socket, onReply, onEdit, sear
                                         {msg.reactions && msg.reactions.length > 0 && !msg.is_deleted && (
                                             <div className={`flex flex-wrap gap-1.5 mt-2 ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
                                                 {Object.entries(groupReactions(msg.reactions, msg.reaction_users)).map(([emoji, data]) => (
-                                                    <button key={emoji} onClick={() => handleAddReaction(msg.id, emoji)} title={data.users.join(', ')} className={`flex items-center gap-1.5 border rounded-full px-2 py-0.5 text-xs transition-all shadow-sm ${data.users.includes(currentUser.username) ? (theme === 'black' ? 'bg-[#1a1a1a] border-cyan-900/50 text-cyan-400 shadow-[inset_0_0_8px_rgba(6,182,212,0.2)]' : 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-500/20 dark:border-indigo-500/30 dark:text-indigo-300') : (theme === 'black' ? 'bg-[#0a0a0a] border-[#222] text-gray-500 hover:bg-[#1a1a1a]' : 'bg-white border-slate-200 text-slate-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700')}`}>
+                                                    <button 
+                                                        key={emoji} 
+                                                        onClick={() => handleAddReaction(msg.id, emoji)} 
+                                                        title={data.users.join(', ')} 
+                                                        className={`flex items-center gap-1.5 border rounded-full px-2 py-0.5 text-xs transition-all shadow-sm ${data.users.includes(currentUser.username) ? (theme === 'black' ? 'bg-[#1a1a1a] border-cyan-900/50 text-cyan-400 shadow-[inset_0_0_8px_rgba(6,182,212,0.2)]' : 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-500/20 dark:border-indigo-500/30 dark:text-indigo-300') : (theme === 'black' ? 'bg-[#0a0a0a] border-[#222] text-gray-500 hover:bg-[#1a1a1a]' : 'bg-white border-slate-200 text-slate-600 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700')}`}
+                                                    >
                                                         <span>{emoji}</span>
                                                         <span className="font-bold opacity-80">{data.count}</span>
                                                     </button>
