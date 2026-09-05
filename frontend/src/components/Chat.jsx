@@ -1,41 +1,50 @@
 import React, { useState, useRef, useEffect } from 'react';
-import ProfileModal from './ProfileModal';
+import SettingsModal from './SettingsModal';
 import MessageList from './MessageList';
+import TaskModal from './TaskModal';
+import AnalyticsModal from './AnalyticsModal'; // NEW: Imported here!
 
 function Chat({
   messages, users, channels, sendMessage, username, userRole, userId, isConnected,
   onKick, onDeleteMessage, onLogout, sendTyping, addReaction, replyToMessage, editMessage,
   createChannel, editChannel, deleteChannel, getChannelMembers, activeChat, changeChat, unreadCounts, theme, setTheme,
-  fetchOlderMessages, hasMoreMessages, isFetchingHistory
+  fetchOlderMessages, hasMoreMessages, isFetchingHistory, createTask, completeTask, editTask
 }) {
     const [newMessage, setNewMessage] = useState('');
-    const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [settingsTab, setSettingsTab] = useState('profile');
+    const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+    
+    // UI Toggles
+    const [isTasksCollapsed, setIsTasksCollapsed] = useState(false);
+    
+    // NEW: Analytics & Edit States placed correctly
+    const [editingTaskData, setEditingTaskData] = useState(null);
+    const [analyticsTaskData, setAnalyticsTaskData] = useState(null);
+    
     const [replyTo, setReplyTo] = useState(null);
     const [editingMessage, setEditingMessage] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
-    
-    // Channel Management Modals
     const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
     const [isEditChannelOpen, setIsEditChannelOpen] = useState(false);
-    
-    // Form States
     const [newChannelName, setNewChannelName] = useState('');
     const [newChannelDesc, setNewChannelDesc] = useState('');
     const [selectedMembers, setSelectedMembers] = useState([]);
-
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     
     const messagesEndRef = useRef(null);
     const fileInputRef = useRef(null);
-    const previousMessagesLengthRef = useRef(messages.length); // NEW: Track length to detect pagination vs new message
+    const previousMessagesLengthRef = useRef(messages.length);
 
     const myProfile = users.find(u => u.username === username) || {
-        id: userId, username: username, avatar_url: null, status: 'Online', bio: ''
+        id: userId, username: username, avatar_url: null, status: 'Online', bio: '', club_roles: []
     };
 
-    // FIXED: Smart Scroll Engine. Only auto-scrolls on initial load or single new messages.
+    const canManageTasks = userRole === 'admin' || (myProfile.club_roles && myProfile.club_roles.some(role => 
+        role.team === 'Executive Board' || String(role.post).includes('Lead') || String(role.post).includes('Manager')
+    ));
+
     useEffect(() => { 
         const isPagination = messages.length >= previousMessagesLengthRef.current + 20; 
         if (!searchQuery && !isPagination) {
@@ -59,7 +68,6 @@ function Chat({
         setIsUploading(true);
         const formData = new FormData();
         formData.append('image', file);
-
         try {
             const res = await fetch('http://localhost:4000/api/messages/image', { method: 'POST', body: formData });
             const data = await res.json();
@@ -75,16 +83,13 @@ function Chat({
         e.preventDefault();
         const safeMessage = String(newMessage).trim();
         if ((!safeMessage && !isUploading) || !isConnected) return;
-
         if (editingMessage) {
             editMessage(editingMessage.id, safeMessage);
             setEditingMessage(null);
         } else if (replyTo) {
             replyToMessage(replyTo.id, safeMessage, replyTo.username, replyTo.content);
             setReplyTo(null);
-        } else {
-            sendMessage({ content: safeMessage });
-        }
+        } else { sendMessage({ content: safeMessage }); }
         setNewMessage('');
         sendTyping(false);
     };
@@ -92,44 +97,24 @@ function Chat({
     const handleCreateChannel = (e) => {
         e.preventDefault();
         if (!newChannelName.trim()) return;
-        createChannel({
-            name: newChannelName.trim().replace(/\s+/g, '-').toLowerCase(),
-            description: newChannelDesc.trim(),
-            members: selectedMembers
-        });
-        setIsCreateChannelOpen(false);
-        setNewChannelName(''); setNewChannelDesc(''); setSelectedMembers([]);
+        createChannel({ name: newChannelName.trim().replace(/\s+/g, '-').toLowerCase(), description: newChannelDesc.trim(), members: selectedMembers });
+        setIsCreateChannelOpen(false); setNewChannelName(''); setNewChannelDesc(''); setSelectedMembers([]);
     };
 
     const openEditModal = () => {
-        setNewChannelName(activeChat.name);
-        setNewChannelDesc(activeChat.description || '');
-        setSelectedMembers([]); 
-        setIsEditChannelOpen(true); 
-        
-        getChannelMembers(activeChat.id, (members) => {
-            setSelectedMembers(members);
-        });
+        setNewChannelName(activeChat.name); setNewChannelDesc(activeChat.description || ''); setSelectedMembers([]); setIsEditChannelOpen(true); 
+        getChannelMembers(activeChat.id, (members) => { setSelectedMembers(members); });
     };
 
     const handleEditChannelSubmit = (e) => {
         e.preventDefault();
         if (!newChannelName.trim()) return;
-        editChannel({
-            channelId: activeChat.id,
-            name: newChannelName.trim().replace(/\s+/g, '-').toLowerCase(),
-            description: newChannelDesc.trim(),
-            members: selectedMembers
-        });
-        setIsEditChannelOpen(false);
-        setNewChannelName(''); setNewChannelDesc(''); setSelectedMembers([]);
+        editChannel({ channelId: activeChat.id, name: newChannelName.trim().replace(/\s+/g, '-').toLowerCase(), description: newChannelDesc.trim(), members: selectedMembers });
+        setIsEditChannelOpen(false); setNewChannelName(''); setNewChannelDesc(''); setSelectedMembers([]);
     };
 
-    const toggleMemberSelection = (targetId) => {
-        setSelectedMembers(prev => prev.includes(targetId) ? prev.filter(id => id !== targetId) : [...prev, targetId]);
-    };
+    const toggleMemberSelection = (targetId) => setSelectedMembers(prev => prev.includes(targetId) ? prev.filter(id => id !== targetId) : [...prev, targetId]);
 
-    const typingUsers = users.filter(u => u.isTyping && u.username !== username);
     const displayedMessages = messages.filter((msg) => {
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
@@ -139,7 +124,42 @@ function Chat({
     const mockSocket = { emit: (event, data) => {
             if (event === 'delete message') onDeleteMessage(data);
             if (event === 'add reaction') addReaction(data.messageId, data.emoji);
+            if (event === 'complete task') completeTask(data); 
     }};
+
+    const taskChannels = channels.filter(c => c.task_deadline);
+    const regularChannels = channels.filter(c => !c.task_deadline);
+
+    // Urgency Calculator for the Collapsed Header
+    let taskHeaderColor = 'text-emerald-500 drop-shadow-[0_0_5px_rgba(16,185,129,0.3)]';
+    let taskArrowColor = 'text-emerald-500';
+
+    if (isTasksCollapsed && taskChannels.length > 0) {
+        let hasRed = false;
+        let hasOrange = false;
+        let hasYellow = false;
+
+        taskChannels.forEach(c => {
+            if (!c.is_completed_by_me && c.task_status !== 'completed' && c.task_deadline) {
+                const msLeft = new Date(c.task_deadline) - new Date();
+                const daysLeft = msLeft / (1000 * 60 * 60 * 24);
+                if (daysLeft <= 1) hasRed = true;
+                else if (daysLeft <= 3) hasOrange = true;
+                else hasYellow = true;
+            }
+        });
+
+        if (hasRed) {
+            taskHeaderColor = 'text-rose-500 drop-shadow-[0_0_5px_rgba(244,63,94,0.4)] animate-pulse';
+            taskArrowColor = 'text-rose-500';
+        } else if (hasOrange) {
+            taskHeaderColor = 'text-orange-500 drop-shadow-[0_0_5px_rgba(249,115,22,0.4)]';
+            taskArrowColor = 'text-orange-500';
+        } else if (hasYellow) {
+            taskHeaderColor = 'text-yellow-500 drop-shadow-[0_0_5px_rgba(234,179,8,0.4)]';
+            taskArrowColor = 'text-yellow-500';
+        }
+    }
 
     const sidebarBg = theme === 'black' ? 'bg-[#050505] border-[#1a1a1a]' : 'bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border-slate-200 dark:border-slate-800';
     const mainBg = theme === 'black' ? 'bg-black' : 'bg-transparent';
@@ -149,7 +169,6 @@ function Chat({
 
     return (
         <div className={`flex h-screen w-full ${textBase}`}>
-            {/* Techy Glass Sidebar */}
             <div className={`w-64 border-r flex flex-col z-20 transition-all duration-300 ${sidebarBg}`}>
                 <div className={`p-5 border-b flex items-center gap-3 ${theme === 'black' ? 'border-[#1a1a1a]' : 'border-slate-200 dark:border-slate-800'}`}>
                     <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.5)]">
@@ -159,7 +178,7 @@ function Chat({
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar">
-                    {/* General Chat */}
+                    
                     <div onClick={() => changeChat(null, false)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${activeChat === null ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-indigo-50 dark:bg-indigo-500/20 shadow-inner') : 'hover:bg-black/10 dark:hover:bg-white/5'}`}>
                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg ${activeChat === null ? 'text-indigo-400 drop-shadow-[0_0_8px_rgba(129,140,248,0.8)]' : 'text-slate-400'}`}>#</div>
                         <div className="flex-1 flex justify-between items-center pr-1">
@@ -168,10 +187,75 @@ function Chat({
                         </div>
                     </div>
 
-                    {/* Channels Section - ENTIRE BLOCK IS ALWAYS VISIBLE */}
-                    <div className="pt-4 pb-2 flex justify-between items-center px-3">
+                    {canManageTasks && (
+                        <div className="pt-4 pb-2 flex justify-between items-center px-3">
+                            <h3 className="text-[10px] font-bold text-amber-600 dark:text-amber-500 tracking-[0.2em] uppercase">Workflows</h3>
+                            <button onClick={() => setIsTaskModalOpen(true)} className="text-amber-500 hover:text-amber-400 transition-colors cursor-pointer p-1" title="Dispatch Task">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
+                            </button>
+                        </div>
+                    )}
+
+                    {taskChannels.length > 0 && (
+                        <div 
+                            onClick={() => setIsTasksCollapsed(!isTasksCollapsed)}
+                            className={`pb-2 flex justify-between items-center px-3 cursor-pointer hover:opacity-80 transition-opacity ${canManageTasks ? 'pt-2' : 'pt-4'}`}
+                        >
+                            <h3 className={`text-[10px] font-bold tracking-[0.2em] uppercase transition-colors ${taskHeaderColor}`}>Active Tasks</h3>
+                            <span className={`text-[10px] transition-colors ${taskArrowColor}`}>{isTasksCollapsed ? '▼' : '▲'}</span>
+                        </div>
+                    )}
+
+                    {!isTasksCollapsed && taskChannels.map(c => {
+                        const isActive = activeChat?.isChannel && activeChat?.id === c.id;
+                        
+                        let channelBg = isActive ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-slate-100 dark:bg-slate-800/80') : 'hover:bg-black/5 dark:hover:bg-white/5 border border-transparent';
+                        let textColor = isActive ? 'text-cyan-400' : '';
+                        let hashColor = isActive ? 'bg-gradient-to-br from-cyan-500 to-blue-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'bg-slate-200 dark:bg-slate-800 text-slate-500';
+
+                        if (c.is_completed_by_me || c.task_status === 'completed') {
+                            channelBg = isActive ? 'bg-emerald-900/40 border border-emerald-500/50' : 'bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20';
+                            textColor = 'text-emerald-500 font-bold';
+                            hashColor = 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.4)]';
+                        } 
+                        else if (c.task_deadline) {
+                            const msLeft = new Date(c.task_deadline) - new Date();
+                            const daysLeft = msLeft / (1000 * 60 * 60 * 24);
+
+                            if (daysLeft < 0) {
+                                channelBg = isActive ? 'bg-rose-900/40 border border-rose-500/50' : 'bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20';
+                                textColor = 'text-rose-500';
+                                hashColor = 'bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.4)]';
+                            } else if (daysLeft <= 1) {
+                                channelBg = isActive ? 'bg-red-900/40 border border-red-500/50' : 'bg-red-500/20 border border-red-500/40 hover:bg-red-500/30 animate-pulse';
+                                textColor = 'text-red-500 font-bold';
+                                hashColor = 'bg-red-500 text-white shadow-[0_0_10px_rgba(239,68,68,0.6)]';
+                            } else if (daysLeft <= 3) {
+                                channelBg = isActive ? 'bg-orange-900/40 border border-orange-500/50' : 'bg-orange-500/20 border border-orange-500/40 hover:bg-orange-500/30';
+                                textColor = 'text-orange-500 font-bold';
+                                hashColor = 'bg-orange-500 text-white shadow-[0_0_10px_rgba(249,115,22,0.4)]';
+                            } else {
+                                channelBg = isActive ? 'bg-yellow-900/40 border border-yellow-500/50' : 'bg-yellow-500/10 border border-yellow-500/30 hover:bg-yellow-500/20';
+                                textColor = 'text-yellow-500 font-bold';
+                                hashColor = 'bg-yellow-500 text-white shadow-[0_0_10px_rgba(234,179,8,0.4)]';
+                            }
+                        }
+
+                        return (
+                            <div key={`channel_${c.id}`} onClick={() => changeChat(c, true)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${channelBg}`}>
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner transition-colors ${hashColor}`}>
+                                    #
+                                </div>
+                                <div className="flex flex-col flex-1 min-w-0">
+                                    <span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span>
+                                </div>
+                                {unreadCounts[`channel_${c.id}`] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts[`channel_${c.id}`]}</span>}
+                            </div>
+                        );
+                    })}
+
+                    <div className={`pb-2 flex justify-between items-center px-3 ${taskChannels.length > 0 ? 'pt-2' : (canManageTasks ? 'pt-2' : 'pt-4')}`}>
                         <h3 className="text-[10px] font-bold text-slate-500 tracking-[0.2em] uppercase">Channels</h3>
-                        {/* ONLY the Add Button is hidden from members */}
                         {userRole === 'admin' && (
                             <button onClick={() => setIsCreateChannelOpen(true)} className="text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer p-1" title="Create Channel">
                                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 4v16m8-8H4" /></svg>
@@ -179,22 +263,25 @@ function Chat({
                         )}
                     </div>
 
-                    {channels.map(c => {
+                    {regularChannels.map(c => {
                         const isActive = activeChat?.isChannel && activeChat?.id === c.id;
+                        let channelBg = isActive ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-slate-100 dark:bg-slate-800/80') : 'hover:bg-black/5 dark:hover:bg-white/5 border border-transparent';
+                        let textColor = isActive ? 'text-cyan-400' : '';
+                        let hashColor = isActive ? 'bg-gradient-to-br from-cyan-500 to-blue-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'bg-slate-200 dark:bg-slate-800 text-slate-500';
+
                         return (
-                            <div key={`channel_${c.id}`} onClick={() => changeChat(c, true)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${isActive ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-slate-100 dark:bg-slate-800/80') : 'hover:bg-black/5 dark:hover:bg-white/5'}`}>
-                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner ${isActive ? 'bg-gradient-to-br from-cyan-500 to-blue-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
+                            <div key={`channel_${c.id}`} onClick={() => changeChat(c, true)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${channelBg}`}>
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner transition-colors ${hashColor}`}>
                                     #
                                 </div>
                                 <div className="flex flex-col flex-1 min-w-0">
-                                    <span className={`text-sm font-semibold truncate ${isActive ? 'text-cyan-400' : ''}`}>{c.name}</span>
+                                    <span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span>
                                 </div>
                                 {unreadCounts[`channel_${c.id}`] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts[`channel_${c.id}`]}</span>}
                             </div>
                         );
                     })}
 
-                    {/* DMs Section */}
                     <div className="pt-4 pb-2">
                         <h3 className="text-[10px] font-bold text-slate-500 tracking-[0.2em] uppercase px-3">Encrypted DMs</h3>
                     </div>
@@ -221,9 +308,10 @@ function Chat({
                             </div>
                         );
                     })}
-                </div>{/* Profile & Controls Footer */}
+                </div>
+
                 <div className={`p-4 border-t flex items-center justify-between relative ${theme === 'black' ? 'border-[#1a1a1a] bg-[#050505]' : 'border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md'}`}>
-                    <div className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1" onClick={() => setIsProfileModalOpen(true)}>
+                    <div className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1" onClick={() => { setSettingsTab('profile'); setIsSettingsOpen(true); }}>
                         {myProfile.avatar_url ? (
                             <img src={myProfile.avatar_url} alt="You" className="w-10 h-10 rounded-xl object-cover" />
                         ) : (
@@ -238,7 +326,7 @@ function Chat({
                     </div>
                     
                     <div className="flex items-center gap-1">
-                        <button onClick={() => setIsSettingsOpen(true)} className={`p-2 rounded-xl transition-colors ${theme === 'black' ? 'hover:bg-[#1a1a1a]' : 'hover:bg-slate-200 dark:hover:bg-slate-800'}`}>
+                        <button onClick={() => { setSettingsTab('theme'); setIsSettingsOpen(true); }} className={`p-2 rounded-xl transition-colors ${theme === 'black' ? 'hover:bg-[#1a1a1a]' : 'hover:bg-slate-200 dark:hover:bg-slate-800'}`}>
                             <svg className="w-5 h-5 opacity-70 hover:opacity-100 hover:text-cyan-400 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                         </button>
                         <button onClick={onLogout} className={`p-2 rounded-xl transition-colors ${theme === 'black' ? 'hover:bg-rose-950/30 hover:text-rose-500' : 'hover:bg-rose-50 dark:hover:bg-rose-500/10 hover:text-rose-500'}`} title="Log Out">
@@ -248,7 +336,6 @@ function Chat({
                 </div>
             </div>
 
-            {/* Main Chat Area */}
             <div className={`flex-1 flex flex-col min-w-0 relative ${mainBg}`}>
                 <div className={`h-16 border-b flex items-center justify-between px-6 backdrop-blur-xl sticky top-0 z-10 ${headerBg}`}>
                     <div className="flex items-center gap-3">
@@ -258,7 +345,6 @@ function Chat({
                                     <span className="text-cyan-500 font-bold text-2xl drop-shadow-[0_0_5px_rgba(6,182,212,0.8)]">#</span>
                                     <h3 className="font-bold text-lg tracking-wide">{activeChat.name}</h3>
                                     
-                                    {/* ADMIN ONLY: Edit & Delete Toolbar inside the header */}
                                     {userRole === 'admin' && (
                                         <div className="flex items-center gap-1 ml-4 border-l border-slate-200 dark:border-slate-800 pl-4">
                                             <button onClick={openEditModal} className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Edit Channel Settings">
@@ -309,12 +395,13 @@ function Chat({
                         </div>
                     )}
                     
-                    {/* FIXED: Passing down Pagination Props */}
                     <MessageList 
                         messages={displayedMessages} currentUser={myProfile} socket={mockSocket}
                         onReply={setReplyTo} onEdit={(msg) => { setEditingMessage(msg); setNewMessage(msg.content); }}
                         searchQuery={searchQuery} theme={theme}
                         fetchOlderMessages={fetchOlderMessages} hasMoreMessages={hasMoreMessages} isFetchingHistory={isFetchingHistory} 
+                        onEditTask={(task) => { setEditingTaskData(task); setIsTaskModalOpen(true); }}
+                        onViewAnalytics={(task) => setAnalyticsTaskData(task)}
                     />
                     <div ref={messagesEndRef} />
                 </div>
@@ -363,103 +450,31 @@ function Chat({
                 </div>
             </div>
 
-            {/* ADMIN ONLY: CREATE CHANNEL MODAL */}
-            {userRole === 'admin' && isCreateChannelOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className={`w-[500px] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${theme === 'black' ? 'bg-[#0a0a0a] border border-[#222]' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
-                        <div className={`p-4 border-b flex justify-between items-center ${theme === 'black' ? 'border-[#1a1a1a] bg-[#050505]' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50'}`}>
-                            <h2 className="text-sm font-bold uppercase tracking-widest text-cyan-500">Create Secure Channel</h2>
-                            <button onClick={() => setIsCreateChannelOpen(false)} className="text-slate-400 hover:text-rose-500">✕</button>
-                        </div>
-                        <form onSubmit={handleCreateChannel} className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Channel Name</label>
-                                <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} required placeholder="e.g. core-team" className={`w-full border rounded-xl px-4 py-3 focus:outline-none text-sm ${theme === 'black' ? 'bg-[#111] border-[#333] focus:border-cyan-500' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 focus:border-indigo-500'}`} />
-                            </div>
-                            
-                            <div className={`mt-4 border rounded-xl p-3 max-h-48 overflow-y-auto custom-scrollbar ${theme === 'black' ? 'border-[#333] bg-[#111]' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50'}`}>
-                                <p className="text-xs font-bold text-slate-500 uppercase mb-2">Select Channel Members</p>
-                                {users.filter(u => u.username !== username).map(u => (
-                                    <div key={u.id} onClick={() => toggleMemberSelection(u.id)} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedMembers.includes(u.id) ? (theme === 'black' ? 'bg-[#222] border border-cyan-500/50' : 'bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-500/30') : 'hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'}`}>
-                                        <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-slate-700 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden">
-                                            {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : u.username.charAt(0).toUpperCase()}
-                                        </div>
-                                        <span className="text-sm font-semibold flex-1">{u.username}</span>
-                                        {selectedMembers.includes(u.id) && <span className="text-indigo-500 dark:text-cyan-400">✓</span>}
-                                    </div>
-                                ))}
-                            </div>
+            <SettingsModal 
+                isOpen={isSettingsOpen} 
+                onClose={() => setIsSettingsOpen(false)} 
+                activeTab={settingsTab} setActiveTab={setSettingsTab}
+                currentUser={username} userId={userId} 
+                currentAvatar={myProfile.avatar_url} currentBio={myProfile.bio} currentStatus={myProfile.status} currentRoles={myProfile.club_roles} 
+                theme={theme} setTheme={setTheme} users={users} canManageTasks={canManageTasks}
+            />
 
-                            <div className="pt-4 flex justify-end gap-3">
-                                <button type="button" onClick={() => setIsCreateChannelOpen(false)} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>Cancel</button>
-                                <button type="submit" disabled={!newChannelName.trim()} className={`px-6 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 ${theme === 'black' ? 'bg-cyan-600 text-black hover:bg-cyan-500' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>Create</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
+            <TaskModal
+                isOpen={isTaskModalOpen}
+                onClose={() => { setIsTaskModalOpen(false); setEditingTaskData(null); }}
+                theme={theme}
+                createTask={createTask}
+                editTask={editTask}
+                username={username}
+                users={users}
+                existingTask={editingTaskData}
+            />
 
-            {/* ADMIN ONLY: EDIT CHANNEL MODAL */}
-            {userRole === 'admin' && isEditChannelOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className={`w-[500px] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${theme === 'black' ? 'bg-[#0a0a0a] border border-[#222]' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
-                        <div className={`p-4 border-b flex justify-between items-center ${theme === 'black' ? 'border-[#1a1a1a] bg-[#050505]' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50'}`}>
-                            <h2 className="text-sm font-bold uppercase tracking-widest text-emerald-500">Edit Settings: {activeChat?.name}</h2>
-                            <button onClick={() => setIsEditChannelOpen(false)} className="text-slate-400 hover:text-rose-500">✕</button>
-                        </div>
-                        <form onSubmit={handleEditChannelSubmit} className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Rename Channel</label>
-                                <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} required placeholder="e.g. core-team" className={`w-full border rounded-xl px-4 py-3 focus:outline-none text-sm ${theme === 'black' ? 'bg-[#111] border-[#333] focus:border-cyan-500' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 focus:border-indigo-500'}`} />
-                            </div>
-                            
-                            <div className={`mt-4 border rounded-xl p-3 max-h-48 overflow-y-auto custom-scrollbar ${theme === 'black' ? 'border-[#333] bg-[#111]' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50'}`}>
-                                <p className="text-xs font-bold text-slate-500 uppercase mb-2">Manage Channel Members</p>
-                                {users.filter(u => u.username !== username).map(u => (
-                                    <div key={u.id} onClick={() => toggleMemberSelection(u.id)} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedMembers.includes(u.id) ? (theme === 'black' ? 'bg-[#222] border border-emerald-500/50' : 'bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-500/30') : 'hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'}`}>
-                                        <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-slate-700 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden">
-                                            {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : u.username.charAt(0).toUpperCase()}
-                                        </div>
-                                        <span className="text-sm font-semibold flex-1">{u.username}</span>
-                                        {selectedMembers.includes(u.id) && <span className="text-emerald-500">✓</span>}
-                                    </div>
-                                ))}
-                            </div>
-
-                            <div className="pt-4 flex justify-end gap-3">
-                                <button type="button" onClick={() => setIsEditChannelOpen(false)} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>Cancel</button>
-                                <button type="submit" disabled={!newChannelName.trim()} className={`px-6 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 ${theme === 'black' ? 'bg-emerald-600 text-black hover:bg-emerald-500' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>Save Changes</button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* SETTINGS MODAL */}
-            {isSettingsOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className={`w-[600px] h-[400px] flex rounded-2xl shadow-2xl overflow-hidden ${theme === 'black' ? 'bg-[#0a0a0a] border border-[#222]' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
-                        <div className={`w-1/3 p-4 flex flex-col gap-2 ${theme === 'black' ? 'bg-[#050505] border-r border-[#1a1a1a]' : 'bg-slate-50 dark:bg-slate-800/50 border-r border-slate-200 dark:border-slate-800'}`}>
-                            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 px-2">Settings</h3>
-                            <button className={`text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors ${theme === 'black' ? 'bg-[#1a1a1a] text-cyan-400 border border-[#333]' : 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'}`}>🎨 Theme Engine</button>
-                        </div>
-                        <div className="w-2/3 p-6 relative">
-                            <button onClick={() => setIsSettingsOpen(false)} className="absolute top-4 right-4 p-2 text-slate-400 hover:text-rose-500 transition-colors">✕</button>
-                            <h2 className={`text-xl font-bold mb-6 ${theme === 'black' ? 'text-white' : 'text-slate-800 dark:text-white'}`}>Theme Engine</h2>
-                            <div className="space-y-3">
-                                <button onClick={() => setTheme('light')} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${theme === 'light' ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-bold' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>☀️ Light Mode</button>
-                                <button onClick={() => setTheme('dark')} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${theme === 'dark' ? 'border-indigo-500 bg-indigo-500/10 text-indigo-400 font-bold' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>🌙 Dark Mode</button>
-                                <button onClick={() => setTheme('black')} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${theme === 'black' ? 'border-cyan-500 bg-[#111] text-cyan-400 font-bold shadow-[0_0_10px_rgba(6,182,212,0.2)]' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>⬛ Black (OLED)</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            <ProfileModal 
-                isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} 
-                currentUser={username} userId={userId} currentAvatar={myProfile.avatar_url}
-                currentBio={myProfile.bio} currentStatus={myProfile.status}
+            <AnalyticsModal 
+                isOpen={!!analyticsTaskData} 
+                onClose={() => setAnalyticsTaskData(null)} 
+                taskData={analyticsTaskData} 
+                theme={theme} 
             />
         </div>
     );
