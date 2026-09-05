@@ -17,14 +17,12 @@ function SettingsModal({
     currentUser, userId, currentAvatar, currentBio, currentStatus, currentRoles = [], 
     theme, setTheme, users = [], canManageTasks = false 
 }) {
-    // Profile States
     const [bio, setBio] = useState('');
     const [status, setStatus] = useState('Online');
     const [avatarFile, setAvatarFile] = useState(null);
     const [previewUrl, setPreviewUrl] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
     
-    // Team Management States
     const [targetMember, setTargetMember] = useState(null);
     const [roleCount, setRoleCount] = useState(0);
     const [clubRoles, setClubRoles] = useState([]);
@@ -40,7 +38,6 @@ function SettingsModal({
         }
     }, [isOpen, currentBio, currentStatus, currentAvatar]); 
 
-    // Handle Team Management Selection
     const selectMemberForEditing = (member) => {
         setTargetMember(member);
         const roles = member.club_roles || [];
@@ -92,7 +89,7 @@ function SettingsModal({
             await fetch('http://localhost:4000/api/profile/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId, bio, status, clubRoles: currentRoles }) // Normal users keep existing roles
+                body: JSON.stringify({ userId, bio, status, clubRoles: currentRoles })
             });
             onClose();
         } catch (error) { alert('Error updating profile'); } 
@@ -125,7 +122,6 @@ function SettingsModal({
         <div className={`fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 ${textBase}`}>
             <div className={`w-[750px] h-[550px] flex rounded-2xl shadow-2xl overflow-hidden border ${modalBg}`}>
                 
-                {/* SIDEBAR */}
                 <div className={`w-1/4 p-4 flex flex-col gap-2 border-r ${sidebarBg}`}>
                     <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 px-2 mt-2">Settings</h3>
                     
@@ -137,7 +133,11 @@ function SettingsModal({
                         <span>🎨</span> Theme Engine
                     </button>
 
-                    {/* NEW: TEAM MANAGEMENT SECURE TAB */}
+                    {/* NEW: SECURITY TAB FOR PACKAGE 5 */}
+                    <button onClick={() => setActiveTab('security')} className={`text-left px-3 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${activeTab === 'security' ? (theme === 'black' ? 'bg-[#1a1a1a] text-cyan-400 border border-[#333]' : 'bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400') : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-800/50'}`}>
+                        <span>🔒</span> Security
+                    </button>
+
                     {canManageTasks && (
                         <>
                             <div className="my-2 border-b border-slate-200 dark:border-slate-700/50"></div>
@@ -152,12 +152,10 @@ function SettingsModal({
                 <div className="w-3/4 flex flex-col relative">
                     <button onClick={onClose} className="absolute top-4 right-4 p-2 text-slate-400 hover:text-rose-500 transition-colors z-20">✕</button>
                     
-                    {/* TAB: PROFILE (Locked down roles) */}
                     {activeTab === 'profile' && (
                         <div className="flex-1 flex flex-col overflow-hidden">
                             <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
                                 <h2 className={`text-xl font-bold mb-6 ${theme === 'black' ? 'text-white' : 'text-slate-800 dark:text-white'}`}>Profile Settings</h2>
-                                
                                 <form id="profileForm" onSubmit={handleProfileSubmit} className="space-y-6">
                                     <div className="flex flex-col items-center mb-6">
                                         <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
@@ -169,7 +167,6 @@ function SettingsModal({
                                         <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
                                         <h3 className={`mt-3 text-xl font-bold ${theme === 'black' ? 'text-white' : 'text-slate-800 dark:text-white'}`}>{currentUser}</h3>
                                         
-                                        {/* Read-Only Role Badges */}
                                         <div className="flex flex-wrap justify-center gap-2 mt-3">
                                             {currentRoles.length > 0 ? currentRoles.map((role, i) => (
                                                 <span key={i} className="text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
@@ -178,7 +175,6 @@ function SettingsModal({
                                             )) : <span className="text-xs text-slate-500 italic">No official roles assigned.</span>}
                                         </div>
                                     </div>
-
                                     <div className="space-y-4">
                                         <div>
                                             <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Status</label>
@@ -193,7 +189,6 @@ function SettingsModal({
                                     </div>
                                 </form>
                             </div>
-                            
                             <div className={`p-5 border-t flex justify-end gap-3 ${sidebarBg}`}>
                                 <button type="button" onClick={onClose} className={`px-5 py-2 rounded-xl font-bold transition-colors ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>Cancel</button>
                                 <button type="submit" form="profileForm" disabled={isSaving} className={`px-6 py-2 rounded-xl font-bold transition-all disabled:opacity-50 flex items-center gap-2 ${theme === 'black' ? 'bg-cyan-600 hover:bg-cyan-500 text-black' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}>
@@ -203,7 +198,15 @@ function SettingsModal({
                         </div>
                     )}
 
-                    {/* TAB: TEAM MANAGEMENT (Admin/Leads Only) */}
+                    {/* NEW: SECURITY TAB (Prep for Package 5) */}
+                    {activeTab === 'security' && (
+                        <div className="flex-1 flex flex-col p-8 items-center justify-center text-center">
+                            <span className="text-6xl mb-4">🔒</span>
+                            <h2 className={`text-xl font-bold mb-2 ${theme === 'black' ? 'text-white' : 'text-slate-800 dark:text-white'}`}>Advanced Security</h2>
+                            <p className="text-slate-500 text-sm max-w-[250px] mx-auto">MFA, Password Editing, and Recovery configurations will be unlocked in the upcoming update.</p>
+                        </div>
+                    )}
+
                     {activeTab === 'team' && canManageTasks && (
                         <div className="flex-1 flex flex-col overflow-hidden">
                             {!targetMember ? (
@@ -265,7 +268,6 @@ function SettingsModal({
                         </div>
                     )}
 
-                    {/* TAB: THEME ENGINE */}
                     {activeTab === 'theme' && (
                         <div className="flex-1 p-8">
                             <h2 className={`text-xl font-bold mb-6 ${theme === 'black' ? 'text-white' : 'text-slate-800 dark:text-white'}`}>Theme Engine</h2>

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import SettingsModal from './SettingsModal';
 import MessageList from './MessageList';
 import TaskModal from './TaskModal';
-import AnalyticsModal from './AnalyticsModal'; // NEW: Imported here!
+import AnalyticsModal from './AnalyticsModal'; 
 
 function Chat({
   messages, users, channels, sendMessage, username, userRole, userId, isConnected,
@@ -14,19 +14,17 @@ function Chat({
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [settingsTab, setSettingsTab] = useState('profile');
     const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
-    
-    // UI Toggles
     const [isTasksCollapsed, setIsTasksCollapsed] = useState(false);
-    
-    // NEW: Analytics & Edit States placed correctly
     const [editingTaskData, setEditingTaskData] = useState(null);
     const [analyticsTaskData, setAnalyticsTaskData] = useState(null);
-    
     const [replyTo, setReplyTo] = useState(null);
     const [editingMessage, setEditingMessage] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
+    
+    // THESE MODALS WERE DROPPED PREVIOUSLY!
     const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
     const [isEditChannelOpen, setIsEditChannelOpen] = useState(false);
+    
     const [newChannelName, setNewChannelName] = useState('');
     const [newChannelDesc, setNewChannelDesc] = useState('');
     const [selectedMembers, setSelectedMembers] = useState([]);
@@ -130,7 +128,6 @@ function Chat({
     const taskChannels = channels.filter(c => c.task_deadline);
     const regularChannels = channels.filter(c => !c.task_deadline);
 
-    // Urgency Calculator for the Collapsed Header
     let taskHeaderColor = 'text-emerald-500 drop-shadow-[0_0_5px_rgba(16,185,129,0.3)]';
     let taskArrowColor = 'text-emerald-500';
 
@@ -197,10 +194,7 @@ function Chat({
                     )}
 
                     {taskChannels.length > 0 && (
-                        <div 
-                            onClick={() => setIsTasksCollapsed(!isTasksCollapsed)}
-                            className={`pb-2 flex justify-between items-center px-3 cursor-pointer hover:opacity-80 transition-opacity ${canManageTasks ? 'pt-2' : 'pt-4'}`}
-                        >
+                        <div onClick={() => setIsTasksCollapsed(!isTasksCollapsed)} className={`pb-2 flex justify-between items-center px-3 cursor-pointer hover:opacity-80 transition-opacity ${canManageTasks ? 'pt-2' : 'pt-4'}`}>
                             <h3 className={`text-[10px] font-bold tracking-[0.2em] uppercase transition-colors ${taskHeaderColor}`}>Active Tasks</h3>
                             <span className={`text-[10px] transition-colors ${taskArrowColor}`}>{isTasksCollapsed ? '▼' : '▲'}</span>
                         </div>
@@ -208,7 +202,6 @@ function Chat({
 
                     {!isTasksCollapsed && taskChannels.map(c => {
                         const isActive = activeChat?.isChannel && activeChat?.id === c.id;
-                        
                         let channelBg = isActive ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-slate-100 dark:bg-slate-800/80') : 'hover:bg-black/5 dark:hover:bg-white/5 border border-transparent';
                         let textColor = isActive ? 'text-cyan-400' : '';
                         let hashColor = isActive ? 'bg-gradient-to-br from-cyan-500 to-blue-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'bg-slate-200 dark:bg-slate-800 text-slate-500';
@@ -243,12 +236,8 @@ function Chat({
 
                         return (
                             <div key={`channel_${c.id}`} onClick={() => changeChat(c, true)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${channelBg}`}>
-                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner transition-colors ${hashColor}`}>
-                                    #
-                                </div>
-                                <div className="flex flex-col flex-1 min-w-0">
-                                    <span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span>
-                                </div>
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner transition-colors ${hashColor}`}>#</div>
+                                <div className="flex flex-col flex-1 min-w-0"><span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span></div>
                                 {unreadCounts[`channel_${c.id}`] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts[`channel_${c.id}`]}</span>}
                             </div>
                         );
@@ -271,12 +260,8 @@ function Chat({
 
                         return (
                             <div key={`channel_${c.id}`} onClick={() => changeChat(c, true)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${channelBg}`}>
-                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner transition-colors ${hashColor}`}>
-                                    #
-                                </div>
-                                <div className="flex flex-col flex-1 min-w-0">
-                                    <span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span>
-                                </div>
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner transition-colors ${hashColor}`}>#</div>
+                                <div className="flex flex-col flex-1 min-w-0"><span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span></div>
                                 {unreadCounts[`channel_${c.id}`] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts[`channel_${c.id}`]}</span>}
                             </div>
                         );
@@ -308,9 +293,7 @@ function Chat({
                             </div>
                         );
                     })}
-                </div>
-
-                <div className={`p-4 border-t flex items-center justify-between relative ${theme === 'black' ? 'border-[#1a1a1a] bg-[#050505]' : 'border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md'}`}>
+                </div><div className={`p-4 border-t flex items-center justify-between relative ${theme === 'black' ? 'border-[#1a1a1a] bg-[#050505]' : 'border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50 backdrop-blur-md'}`}>
                     <div className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity min-w-0 flex-1" onClick={() => { setSettingsTab('profile'); setIsSettingsOpen(true); }}>
                         {myProfile.avatar_url ? (
                             <img src={myProfile.avatar_url} alt="You" className="w-10 h-10 rounded-xl object-cover" />
@@ -347,12 +330,8 @@ function Chat({
                                     
                                     {userRole === 'admin' && (
                                         <div className="flex items-center gap-1 ml-4 border-l border-slate-200 dark:border-slate-800 pl-4">
-                                            <button onClick={openEditModal} className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Edit Channel Settings">
-                                                ✏️
-                                            </button>
-                                            <button onClick={() => { if (window.confirm("Permanently nuke this channel and all its data?")) deleteChannel(activeChat.id); }} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Delete Channel">
-                                                🗑️
-                                            </button>
+                                            <button onClick={openEditModal} className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Edit Channel Settings">✏️</button>
+                                            <button onClick={() => { if (window.confirm("Permanently nuke this channel and all its data?")) deleteChannel(activeChat.id); }} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Delete Channel">🗑️</button>
                                         </div>
                                     )}
                                 </div>
@@ -450,9 +429,80 @@ function Chat({
                 </div>
             </div>
 
+            {/* RESTORED: CREATE CHANNEL MODAL */}
+            {userRole === 'admin' && isCreateChannelOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className={`w-[500px] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${theme === 'black' ? 'bg-[#0a0a0a] border border-[#222]' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
+                        <div className={`p-4 border-b flex justify-between items-center ${theme === 'black' ? 'border-[#1a1a1a] bg-[#050505]' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50'}`}>
+                            <h2 className="text-sm font-bold uppercase tracking-widest text-cyan-500">Create Secure Channel</h2>
+                            <button onClick={() => setIsCreateChannelOpen(false)} className="text-slate-400 hover:text-rose-500">✕</button>
+                        </div>
+                        <form onSubmit={handleCreateChannel} className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Channel Name</label>
+                                <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} required placeholder="e.g. core-team" className={`w-full border rounded-xl px-4 py-3 focus:outline-none text-sm ${theme === 'black' ? 'bg-[#111] border-[#333] focus:border-cyan-500' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 focus:border-indigo-500'}`} />
+                            </div>
+                            
+                            <div className={`mt-4 border rounded-xl p-3 max-h-48 overflow-y-auto custom-scrollbar ${theme === 'black' ? 'border-[#333] bg-[#111]' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50'}`}>
+                                <p className="text-xs font-bold text-slate-500 uppercase mb-2">Select Channel Members</p>
+                                {users.filter(u => u.username !== username).map(u => (
+                                    <div key={u.id} onClick={() => toggleMemberSelection(u.id)} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedMembers.includes(u.id) ? (theme === 'black' ? 'bg-[#222] border border-cyan-500/50' : 'bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-500/30') : 'hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'}`}>
+                                        <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-slate-700 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden">
+                                            {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : u.username.charAt(0).toUpperCase()}
+                                        </div>
+                                        <span className="text-sm font-semibold flex-1">{u.username}</span>
+                                        {selectedMembers.includes(u.id) && <span className="text-indigo-500 dark:text-cyan-400">✓</span>}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="pt-4 flex justify-end gap-3">
+                                <button type="button" onClick={() => setIsCreateChannelOpen(false)} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>Cancel</button>
+                                <button type="submit" disabled={!newChannelName.trim()} className={`px-6 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 ${theme === 'black' ? 'bg-cyan-600 text-black hover:bg-cyan-500' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>Create</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* RESTORED: EDIT CHANNEL MODAL */}
+            {userRole === 'admin' && isEditChannelOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className={`w-[500px] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${theme === 'black' ? 'bg-[#0a0a0a] border border-[#222]' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
+                        <div className={`p-4 border-b flex justify-between items-center ${theme === 'black' ? 'border-[#1a1a1a] bg-[#050505]' : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50'}`}>
+                            <h2 className="text-sm font-bold uppercase tracking-widest text-emerald-500">Edit Settings: {activeChat?.name}</h2>
+                            <button onClick={() => setIsEditChannelOpen(false)} className="text-slate-400 hover:text-rose-500">✕</button>
+                        </div>
+                        <form onSubmit={handleEditChannelSubmit} className="p-6 space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Rename Channel</label>
+                                <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} required placeholder="e.g. core-team" className={`w-full border rounded-xl px-4 py-3 focus:outline-none text-sm ${theme === 'black' ? 'bg-[#111] border-[#333] focus:border-cyan-500' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 focus:border-indigo-500'}`} />
+                            </div>
+                            
+                            <div className={`mt-4 border rounded-xl p-3 max-h-48 overflow-y-auto custom-scrollbar ${theme === 'black' ? 'border-[#333] bg-[#111]' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50'}`}>
+                                <p className="text-xs font-bold text-slate-500 uppercase mb-2">Manage Channel Members</p>
+                                {users.filter(u => u.username !== username).map(u => (
+                                    <div key={u.id} onClick={() => toggleMemberSelection(u.id)} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedMembers.includes(u.id) ? (theme === 'black' ? 'bg-[#222] border border-emerald-500/50' : 'bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-500/30') : 'hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'}`}>
+                                        <div className="w-6 h-6 rounded-full bg-slate-300 dark:bg-slate-700 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden">
+                                            {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : u.username.charAt(0).toUpperCase()}
+                                        </div>
+                                        <span className="text-sm font-semibold flex-1">{u.username}</span>
+                                        {selectedMembers.includes(u.id) && <span className="text-emerald-500">✓</span>}
+                                    </div>
+                                ))}
+                            </div>
+
+                            <div className="pt-4 flex justify-end gap-3">
+                                <button type="button" onClick={() => setIsEditChannelOpen(false)} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>Cancel</button>
+                                <button type="submit" disabled={!newChannelName.trim()} className={`px-6 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 ${theme === 'black' ? 'bg-emerald-600 text-black hover:bg-emerald-500' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>Save Changes</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
             <SettingsModal 
-                isOpen={isSettingsOpen} 
-                onClose={() => setIsSettingsOpen(false)} 
+                isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} 
                 activeTab={settingsTab} setActiveTab={setSettingsTab}
                 currentUser={username} userId={userId} 
                 currentAvatar={myProfile.avatar_url} currentBio={myProfile.bio} currentStatus={myProfile.status} currentRoles={myProfile.club_roles} 
@@ -460,21 +510,13 @@ function Chat({
             />
 
             <TaskModal
-                isOpen={isTaskModalOpen}
-                onClose={() => { setIsTaskModalOpen(false); setEditingTaskData(null); }}
-                theme={theme}
-                createTask={createTask}
-                editTask={editTask}
-                username={username}
-                users={users}
-                existingTask={editingTaskData}
+                isOpen={isTaskModalOpen} onClose={() => { setIsTaskModalOpen(false); setEditingTaskData(null); }}
+                theme={theme} createTask={createTask} editTask={editTask} username={username} users={users} existingTask={editingTaskData}
             />
 
             <AnalyticsModal 
-                isOpen={!!analyticsTaskData} 
-                onClose={() => setAnalyticsTaskData(null)} 
-                taskData={analyticsTaskData} 
-                theme={theme} 
+                isOpen={!!analyticsTaskData} onClose={() => setAnalyticsTaskData(null)} 
+                taskData={analyticsTaskData} theme={theme} 
             />
         </div>
     );
