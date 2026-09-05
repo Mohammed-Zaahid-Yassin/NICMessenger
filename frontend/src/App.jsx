@@ -42,7 +42,6 @@ function App() {
   const [unreadCounts, setUnreadCounts] = useState({});
   const [theme, setTheme] = useState(localStorage.getItem('nic_theme') || 'dark');
   
-  // NEW: Pagination State
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [isFetchingHistory, setIsFetchingHistory] = useState(false);
   
@@ -60,7 +59,9 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem('nic_theme', theme);
-    if (theme === 'dark' || theme === 'black') {
+    if (theme === 'black') {
+      document.documentElement.classList.add('dark');
+    } else if (theme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
@@ -104,13 +105,11 @@ function App() {
       socket.on('connect', () => setIsConnected(true));
       socket.on('disconnect', () => setIsConnected(false));
       
-      // FIXED: Handles the initial 50 messages
       socket.on('previous messages', (msgs) => {
           setMessages(msgs);
-          setHasMoreMessages(msgs.length === 50); // If less than 50, we hit the beginning of time
+          setHasMoreMessages(msgs.length === 50);
       });
 
-      // NEW: Handles the older chunks, prepending them to the array safely
       socket.on('older messages', (msgs) => {
           setMessages(prev => [...msgs, ...prev]);
           setHasMoreMessages(msgs.length === 50);
@@ -225,7 +224,11 @@ function App() {
       });
 
       socket.on('message deleted', (data) => {
-        setMessages(prev => prev.map(msg => msg.id === data.messageId ? { ...msg, content: data.content, image_url: null, is_deleted: true, deleted_by: data.deleted_by, reactions: [], reaction_users: [] } : msg));
+        setMessages(prev => prev.map(msg => msg.id === data.messageId ? { ...msg, content: data.content, image_url: null, is_deleted: true, deleted_by: data.deleted_by, reactions: [], reaction_users: [], task_data: null } : msg));
+      });
+
+      socket.on('task completed', ({ messageId, taskData }) => {
+        setMessages(prev => prev.map(msg => msg.id === messageId ? { ...msg, task_data: taskData } : msg));
       });
 
       socket.on('user list', (userList) => setUsers(userList));
@@ -247,7 +250,9 @@ function App() {
 
       return () => { if (socket.connected) socket.disconnect(); };
     }
-  }, [token]);const handleLogin = async (username, password, isSignup) => {
+  }, [token]);
+
+  const handleLogin = async (username, password, isSignup) => {
     try {
       const endpoint = isSignup ? '/api/register' : '/api/login';
       const response = await fetch(`http://localhost:4000${endpoint}`, {
@@ -296,7 +301,7 @@ function App() {
   const changeChat = (target, isChannel = false) => {
     setActiveChat(target ? { ...target, isChannel } : null);
     setMessages([]); 
-    setHasMoreMessages(true); // Reset pagination flags when changing rooms
+    setHasMoreMessages(true);
     setIsFetchingHistory(false);
     
     const chatKey = target ? (isChannel ? `channel_${target.id}` : target.id) : 'general';
@@ -316,7 +321,6 @@ function App() {
     }
   };
 
-  // NEW: Emit the fetch command for the intersection observer
   const fetchOlderMessages = (offset) => {
       if (socketRef.current && isConnected && hasMoreMessages && !isFetchingHistory) {
           setIsFetchingHistory(true);
@@ -330,70 +334,47 @@ function App() {
       }
   };
 
-  const createChannel = (channelData) => {
-    if (socketRef.current && isConnected) socketRef.current.emit('create channel', channelData);
-  };
-
-  const editChannel = (channelData) => {
-    if (socketRef.current && isConnected) socketRef.current.emit('edit channel', channelData);
-  };
-
-  const deleteChannel = (channelId) => {
-    if (socketRef.current && isConnected) socketRef.current.emit('delete channel', channelId);
-  };
+  const createChannel = (channelData) => { if (socketRef.current && isConnected) socketRef.current.emit('create channel', channelData); };
+  const editChannel = (channelData) => { if (socketRef.current && isConnected) socketRef.current.emit('edit channel', channelData); };
+  const deleteChannel = (channelId) => { if (socketRef.current && isConnected) socketRef.current.emit('delete channel', channelId); };
 
   const getChannelMembers = (channelId, callback) => {
       if (socketRef.current && isConnected) {
           socketRef.current.emit('get channel members', channelId);
-          socketRef.current.once(`channel members ${channelId}`, (members) => {
-              callback(members);
-          });
+          socketRef.current.once(`channel members ${channelId}`, callback);
       }
   };
 
   const sendMessage = (data) => {
     if (socketRef.current && isConnected) {
       const payload = { ...data };
-      if (activeChat?.isChannel) {
-          payload.channelId = activeChat.id;
-      } else {
-          payload.recipientId = activeChat ? activeChat.id : null;
-      }
+      if (activeChat?.isChannel) payload.channelId = activeChat.id;
+      else payload.recipientId = activeChat ? activeChat.id : null;
       socketRef.current.emit('chat message', payload);
     }
   };
 
-  const sendTyping = (isTyping) => {
-    if (socketRef.current && isConnected) socketRef.current.emit(isTyping ? 'typing start' : 'typing stop');
-  };
-
-  const addReaction = (messageId, emoji) => {
-    if (socketRef.current && isConnected) socketRef.current.emit('add reaction', { messageId, emoji });
-  };
+  const sendTyping = (isTyping) => { if (socketRef.current && isConnected) socketRef.current.emit(isTyping ? 'typing start' : 'typing stop'); };
+  const addReaction = (messageId, emoji) => { if (socketRef.current && isConnected) socketRef.current.emit('add reaction', { messageId, emoji }); };
 
   const replyToMessage = (messageId, content, replyToUsername, replyToContent) => {
     if (socketRef.current && isConnected && content.trim()) {
       const payload = { messageId, content, replyToUsername, replyToContent };
-      if (activeChat?.isChannel) {
-          payload.channelId = activeChat.id;
-      } else {
-          payload.recipientId = activeChat ? activeChat.id : null;
-      }
+      if (activeChat?.isChannel) payload.channelId = activeChat.id;
+      else payload.recipientId = activeChat ? activeChat.id : null;
       socketRef.current.emit('reply to message', payload);
     }
   };
 
-  const editMessage = (messageId, content) => {
-    if (socketRef.current && isConnected) socketRef.current.emit('edit message', { messageId, content });
-  };
+  const editMessage = (messageId, content) => { if (socketRef.current && isConnected) socketRef.current.emit('edit message', { messageId, content }); };
+  const handleKick = (targetUsername) => { if (socketRef.current && isConnected && userRole === 'admin') socketRef.current.emit('kick user', targetUsername); };
+  const handleDeleteMessage = (messageId) => { if (socketRef.current && isConnected) socketRef.current.emit('delete message', messageId); };
 
-  const handleKick = (targetUsername) => {
-    if (socketRef.current && isConnected && userRole === 'admin') socketRef.current.emit('kick user', targetUsername);
-  };
-
-  const handleDeleteMessage = (messageId) => {
-    if (socketRef.current && isConnected) socketRef.current.emit('delete message', messageId);
-  };
+  const createTask = (taskData) => { if (socketRef.current && isConnected) socketRef.current.emit('create task', taskData); };
+  const completeTask = (messageId) => { if (socketRef.current && isConnected) socketRef.current.emit('complete task', messageId); };
+  
+  // NEW: Delete Task Function
+  const deleteTask = (data) => { if (socketRef.current && isConnected) socketRef.current.emit('delete task', data); };
 
   if (isLoading) {
     return (
@@ -422,7 +403,8 @@ function App() {
               createChannel={createChannel} editChannel={editChannel} deleteChannel={deleteChannel} getChannelMembers={getChannelMembers}
               activeChat={activeChat} changeChat={changeChat} unreadCounts={unreadCounts}
               theme={theme} setTheme={setTheme}
-              fetchOlderMessages={fetchOlderMessages} hasMoreMessages={hasMoreMessages} isFetchingHistory={isFetchingHistory} // NEW PROPS
+              fetchOlderMessages={fetchOlderMessages} hasMoreMessages={hasMoreMessages} isFetchingHistory={isFetchingHistory}
+              createTask={createTask} completeTask={completeTask} deleteTask={deleteTask}
             />
           ) : <Navigate to="/login" replace />} 
         />
