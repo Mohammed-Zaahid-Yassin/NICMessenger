@@ -54,7 +54,6 @@ function MessageList({ messages, currentUser, socket, onReply, onEdit, searchQue
                     try { taskCard = JSON.parse(msg.task_data); } catch(e){} 
                 }
                 
-                // Permission Check for Edit/Analytics Buttons (Made more robust for Admins)
                 const isOwnerOrAdmin = currentUser.role === 'admin' || currentUser.username === 'admin' || (taskCard && currentUser.id === taskCard.createdBy) || (currentUser.club_roles && currentUser.club_roles.some(r => r.team === 'Executive Board' || String(r.post).includes('Lead') || String(r.post).includes('Manager')));
 
                 return (
@@ -82,7 +81,7 @@ function MessageList({ messages, currentUser, socket, onReply, onEdit, searchQue
                                             <span className="text-[10px] font-semibold text-slate-400">{formatTime(msg.timestamp)}</span>
                                         </div>
                                         
-                                        {/* FIXED: Tags now sit on their own line below the name with full text and no emojis */}
+                                        {/* PERFECTED TAGS: Own line, no emojis, full text */}
                                         {msg.club_roles && msg.club_roles.length > 0 && !isMe && (
                                             <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
                                                 {msg.club_roles.map((role, i) => (
@@ -93,9 +92,7 @@ function MessageList({ messages, currentUser, socket, onReply, onEdit, searchQue
                                             </div>
                                         )}
                                     </div>
-                                )}
-
-                                {msg.reply_to && !isDeleted && (
+                                )}{msg.reply_to && !isDeleted && (
                                     <div className={`mb-1 px-3 py-1.5 rounded-lg text-xs border-l-2 opacity-70 flex flex-col ${isMe ? (theme === 'black' ? 'bg-[#111] border-cyan-500 text-gray-400' : 'bg-indigo-50/50 dark:bg-indigo-500/10 border-indigo-400 text-indigo-600 dark:text-indigo-300') : (theme === 'black' ? 'bg-[#111] border-[#333] text-gray-500' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-300 dark:border-slate-600 text-slate-500')}`}>
                                         <span className="font-bold mb-0.5">{msg.reply_to_username}</span>
                                         <span className="truncate line-clamp-1">{msg.reply_to_content}</span>
