@@ -190,7 +190,47 @@ app.post('/api/profile/avatar', uploadAvatar.single('avatar'), (req, res) => {
 app.post('/api/messages/image', uploadAttachment.single('image'), (req, res) => {
     if (!req.file) return res.status(500).json({ error: 'Upload error' });
     res.json({ success: true, imageUrl: req.file.path });
-});// ===== SECURE SOCKET SETUP & ROUTING =====
+});
+
+// --- PACKAGE 5: SECURITY APIs ---
+
+app.post('/api/profile/password', async (req, res) => {
+    const { userId, currentPassword, newPassword } = req.body;
+    db.get('SELECT password FROM users WHERE id = ?', [userId], async (err, user) => {
+        if (err || !user) return res.status(400).json({ error: 'User not found' });
+        
+        const validPassword = await bcrypt.compare(currentPassword, user.password);
+        if (!validPassword) return res.status(400).json({ error: 'Incorrect current password' });
+        
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        db.run('UPDATE users SET password = ? WHERE id = ?', [hashed, userId], function(err) {
+            if (err) return res.status(500).json({ error: 'Failed to update password' });
+            res.json({ success: true, message: 'Password updated successfully' });
+        });
+    });
+});
+
+app.post('/api/profile/delete', async (req, res) => {
+    const { userId, password } = req.body;
+    db.get('SELECT password, role FROM users WHERE id = ?', [userId], async (err, user) => {
+        if (err || !user) return res.status(400).json({ error: 'User not found' });
+        if (user.role === 'admin') return res.status(403).json({ error: 'Super Admin cannot be deleted.' });
+        
+        const validPassword = await bcrypt.compare(password, user.password);
+        if (!validPassword) return res.status(400).json({ error: 'Incorrect password' });
+
+        db.serialize(() => {
+            db.run('DELETE FROM channel_members WHERE user_id = ?', [userId]);
+            db.run('DELETE FROM reactions WHERE user_id = ?', [userId]);
+            db.run('DELETE FROM task_completions WHERE user_id = ?', [userId]);
+            db.run('DELETE FROM users WHERE id = ?', [userId], () => {
+                res.json({ success: true });
+            });
+        });
+    });
+});
+
+// ===== SECURE SOCKET SETUP & ROUTING =====
 const connectedUsers = {};
 const typingUsers = {};
 
