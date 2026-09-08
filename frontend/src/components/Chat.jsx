@@ -14,20 +14,25 @@ function Chat({
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [settingsTab, setSettingsTab] = useState('profile');
     const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+    
+    // UI Toggles & Task States
     const [isTasksCollapsed, setIsTasksCollapsed] = useState(false);
     const [editingTaskData, setEditingTaskData] = useState(null);
     const [analyticsTaskData, setAnalyticsTaskData] = useState(null);
+    
+    // Message States
     const [replyTo, setReplyTo] = useState(null);
     const [editingMessage, setEditingMessage] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
     
-    // THESE MODALS WERE DROPPED PREVIOUSLY!
+    // Channel Management States
     const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
     const [isEditChannelOpen, setIsEditChannelOpen] = useState(false);
-    
     const [newChannelName, setNewChannelName] = useState('');
     const [newChannelDesc, setNewChannelDesc] = useState('');
     const [selectedMembers, setSelectedMembers] = useState([]);
+    
+    // Search States
     const [searchQuery, setSearchQuery] = useState('');
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     
@@ -128,6 +133,7 @@ function Chat({
     const taskChannels = channels.filter(c => c.task_deadline);
     const regularChannels = channels.filter(c => !c.task_deadline);
 
+    // Urgency Calculator for the Collapsed Task Header
     let taskHeaderColor = 'text-emerald-500 drop-shadow-[0_0_5px_rgba(16,185,129,0.3)]';
     let taskArrowColor = 'text-emerald-500';
 
@@ -166,6 +172,8 @@ function Chat({
 
     return (
         <div className={`flex h-screen w-full ${textBase}`}>
+            
+            {/* SIDEBAR */}
             <div className={`w-64 border-r flex flex-col z-20 transition-all duration-300 ${sidebarBg}`}>
                 <div className={`p-5 border-b flex items-center gap-3 ${theme === 'black' ? 'border-[#1a1a1a]' : 'border-slate-200 dark:border-slate-800'}`}>
                     <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.5)]">
@@ -194,7 +202,10 @@ function Chat({
                     )}
 
                     {taskChannels.length > 0 && (
-                        <div onClick={() => setIsTasksCollapsed(!isTasksCollapsed)} className={`pb-2 flex justify-between items-center px-3 cursor-pointer hover:opacity-80 transition-opacity ${canManageTasks ? 'pt-2' : 'pt-4'}`}>
+                        <div 
+                            onClick={() => setIsTasksCollapsed(!isTasksCollapsed)}
+                            className={`pb-2 flex justify-between items-center px-3 cursor-pointer hover:opacity-80 transition-opacity ${canManageTasks ? 'pt-2' : 'pt-4'}`}
+                        >
                             <h3 className={`text-[10px] font-bold tracking-[0.2em] uppercase transition-colors ${taskHeaderColor}`}>Active Tasks</h3>
                             <span className={`text-[10px] transition-colors ${taskArrowColor}`}>{isTasksCollapsed ? '▼' : '▲'}</span>
                         </div>
@@ -237,7 +248,9 @@ function Chat({
                         return (
                             <div key={`channel_${c.id}`} onClick={() => changeChat(c, true)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${channelBg}`}>
                                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner transition-colors ${hashColor}`}>#</div>
-                                <div className="flex flex-col flex-1 min-w-0"><span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span></div>
+                                <div className="flex flex-col flex-1 min-w-0">
+                                    <span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span>
+                                </div>
                                 {unreadCounts[`channel_${c.id}`] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts[`channel_${c.id}`]}</span>}
                             </div>
                         );
@@ -261,7 +274,9 @@ function Chat({
                         return (
                             <div key={`channel_${c.id}`} onClick={() => changeChat(c, true)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${channelBg}`}>
                                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner transition-colors ${hashColor}`}>#</div>
-                                <div className="flex flex-col flex-1 min-w-0"><span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span></div>
+                                <div className="flex flex-col flex-1 min-w-0">
+                                    <span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span>
+                                </div>
                                 {unreadCounts[`channel_${c.id}`] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts[`channel_${c.id}`]}</span>}
                             </div>
                         );
@@ -319,6 +334,7 @@ function Chat({
                 </div>
             </div>
 
+            {/* MAIN CHAT AREA */}
             <div className={`flex-1 flex flex-col min-w-0 relative ${mainBg}`}>
                 <div className={`h-16 border-b flex items-center justify-between px-6 backdrop-blur-xl sticky top-0 z-10 ${headerBg}`}>
                     <div className="flex items-center gap-3">
@@ -402,11 +418,7 @@ function Chat({
                     <form onSubmit={handleSendMessage} className="flex gap-3 items-center">
                         <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
                         
-                        <button 
-                            type="button" onClick={() => fileInputRef.current?.click()}
-                            disabled={!isConnected || isUploading || editingMessage}
-                            className={`p-3.5 rounded-full transition-all disabled:opacity-50 ${theme === 'black' ? 'bg-[#1a1a1a] hover:bg-[#222] hover:text-cyan-400 border border-[#333]' : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-indigo-500'}`}
-                        >
+                        <button type="button" onClick={() => fileInputRef.current?.click()} disabled={!isConnected || isUploading || editingMessage} className={`p-3.5 rounded-full transition-all disabled:opacity-50 ${theme === 'black' ? 'bg-[#1a1a1a] hover:bg-[#222] hover:text-cyan-400 border border-[#333]' : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-indigo-500'}`}>
                             {isUploading ? <span className="animate-spin block">⏳</span> : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>}
                         </button>
                         
@@ -419,17 +431,14 @@ function Chat({
                             />
                         </div>
                         
-                        <button 
-                            type="submit" disabled={(!newMessage.trim() && !isUploading) || !isConnected}
-                            className={`p-3.5 rounded-full transition-all disabled:opacity-50 disabled:shadow-none ${theme === 'black' ? 'bg-cyan-600 hover:bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.4)]' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/20'}`}
-                        >
+                        <button type="submit" disabled={(!newMessage.trim() && !isUploading) || !isConnected} className={`p-3.5 rounded-full transition-all disabled:opacity-50 disabled:shadow-none ${theme === 'black' ? 'bg-cyan-600 hover:bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.4)]' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-500/20'}`}>
                             <svg className="w-5 h-5 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
                         </button>
                     </form>
                 </div>
             </div>
 
-            {/* RESTORED: CREATE CHANNEL MODAL */}
+            {/* MODALS */}
             {userRole === 'admin' && isCreateChannelOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
                     <div className={`w-[500px] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${theme === 'black' ? 'bg-[#0a0a0a] border border-[#222]' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
@@ -465,7 +474,6 @@ function Chat({
                 </div>
             )}
 
-            {/* RESTORED: EDIT CHANNEL MODAL */}
             {userRole === 'admin' && isEditChannelOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
                     <div className={`w-[500px] flex flex-col rounded-2xl shadow-2xl overflow-hidden ${theme === 'black' ? 'bg-[#0a0a0a] border border-[#222]' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'}`}>
@@ -507,6 +515,7 @@ function Chat({
                 currentUser={username} userId={userId} 
                 currentAvatar={myProfile.avatar_url} currentBio={myProfile.bio} currentStatus={myProfile.status} currentRoles={myProfile.club_roles} 
                 theme={theme} setTheme={setTheme} users={users} canManageTasks={canManageTasks}
+                onLogout={onLogout} // WIRED PERFECTLY FOR SECURITY TAB!
             />
 
             <TaskModal
