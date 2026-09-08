@@ -46,7 +46,8 @@ function MessageList({ messages, currentUser, socket, onReply, onEdit, searchQue
                 const showDateHeader = msgDate !== currentDate;
                 if (showDateHeader) currentDate = msgDate;
 
-                const isDeleted = msg.is_deleted;
+                // Safely convert SQLite 0/1 to boolean
+                const isDeleted = msg.is_deleted === 1;
                 const isSystem = msg.isSystem || msg.username === 'System' || msg.username.includes('(System)');
 
                 let taskCard = null;
@@ -92,7 +93,7 @@ function MessageList({ messages, currentUser, socket, onReply, onEdit, searchQue
                                             </div>
                                         )}
                                     </div>
-                                )}{msg.reply_to && !isDeleted && (
+                                )}{msg.reply_to != null && !isDeleted && (
                                     <div className={`mb-1 px-3 py-1.5 rounded-lg text-xs border-l-2 opacity-70 flex flex-col ${isMe ? (theme === 'black' ? 'bg-[#111] border-cyan-500 text-gray-400' : 'bg-indigo-50/50 dark:bg-indigo-500/10 border-indigo-400 text-indigo-600 dark:text-indigo-300') : (theme === 'black' ? 'bg-[#111] border-[#333] text-gray-500' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-300 dark:border-slate-600 text-slate-500')}`}>
                                         <span className="font-bold mb-0.5">{msg.reply_to_username}</span>
                                         <span className="truncate line-clamp-1">{msg.reply_to_content}</span>
@@ -146,7 +147,8 @@ function MessageList({ messages, currentUser, socket, onReply, onEdit, searchQue
                                             {msg.image_url && !isDeleted && <a href={msg.image_url} target="_blank" rel="noopener noreferrer" className="block mb-2 overflow-hidden rounded-xl"><img src={msg.image_url} alt="attachment" className="max-w-[250px] max-h-[250px] object-cover hover:scale-105 transition-transform duration-300" /></a>}
                                             <p className={`whitespace-pre-wrap break-words text-[15px] leading-relaxed ${isSystem ? 'text-center' : ''}`}>
                                                 {highlightText(msg.content, searchQuery)}
-                                                {msg.edited && !isDeleted && <span className="text-[9px] opacity-50 ml-2 font-bold uppercase">(Edited)</span>}
+                                                {/* FIXED: Strict check prevents the 0 error! */}
+                                                {msg.edited === 1 && !isDeleted && <span className="text-[9px] opacity-50 ml-2 font-bold uppercase">(Edited)</span>}
                                             </p>
                                         </div>
                                         {!isSystem && hoveredMessage === msg.id && !isDeleted && (
