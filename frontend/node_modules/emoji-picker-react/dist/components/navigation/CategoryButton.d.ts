@@ -1,0 +1,12 @@
+import * as React from 'react';
+import { CategoryConfig } from '../../types/exposedTypes';
+declare type Props = {
+    isActiveCategory: boolean;
+    category: string;
+    allowNavigation: boolean;
+    onClick: () => void;
+    categoryConfig: CategoryConfig;
+    customIcon?: React.ReactNode;
+};
+export declare function CategoryButton({ isActiveCategory, category, allowNavigation, categoryConfig, onClick, customIcon, }: Props): JSX.Element;
+export {};

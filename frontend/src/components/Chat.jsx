@@ -118,10 +118,41 @@ function Chat({
 
     const toggleMemberSelection = (targetId) => setSelectedMembers(prev => prev.includes(targetId) ? prev.filter(id => id !== targetId) : [...prev, targetId]);
 
+    // THE FIX: Strict Quarantine Routing to stop Task Bleeding
     const displayedMessages = messages.filter((msg) => {
-        if (!searchQuery.trim()) return true;
-        const q = searchQuery.toLowerCase();
-        return (msg.content && msg.content.toLowerCase().includes(q)) || (msg.username && msg.username.toLowerCase().includes(q));
+        const cId = msg.channel_id || msg.channelId;
+        const rId = msg.recipient_id || msg.recipientId;
+        const sId = msg.sender_id || msg.senderId;
+
+        let belongsToView = true;
+        
+        if (activeChat === null) {
+            // General Chat: Only show messages with no specific target
+            if (cId || rId) belongsToView = false;
+        } else if (activeChat.isChannel || activeChat.task_deadline !== undefined) {
+            // Viewing a Channel or Task Group
+            if (cId !== activeChat.id) belongsToView = false;
+        } else {
+            // Viewing a specific user DM
+            if (cId) belongsToView = false;
+            else if (rId && sId) {
+                const isMyDM = (sId === userId && rId === activeChat.id) || (sId === activeChat.id && rId === userId);
+                if (!isMyDM) belongsToView = false;
+            } else {
+                // If it's a global message without a target, keep it OUT of private DMs
+                belongsToView = false; 
+            }
+        }
+
+        if (belongsToView && searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            const contentMatch = msg.content && msg.content.toLowerCase().includes(q);
+            const userMatch = msg.username && msg.username.toLowerCase().includes(q);
+            const taskMatch = msg.task_data && msg.task_data.toLowerCase().includes(q);
+            if (!contentMatch && !userMatch && !taskMatch) belongsToView = false;
+        }
+
+        return belongsToView;
     });
 
     const mockSocket = { emit: (event, data) => {
@@ -133,35 +164,20 @@ function Chat({
     const taskChannels = channels.filter(c => c.task_deadline);
     const regularChannels = channels.filter(c => !c.task_deadline);
 
-    // Urgency Calculator for the Collapsed Task Header
     let taskHeaderColor = 'text-emerald-500 drop-shadow-[0_0_5px_rgba(16,185,129,0.3)]';
     let taskArrowColor = 'text-emerald-500';
 
     if (isTasksCollapsed && taskChannels.length > 0) {
-        let hasRed = false;
-        let hasOrange = false;
-        let hasYellow = false;
-
+        let hasRed = false; let hasOrange = false; let hasYellow = false;
         taskChannels.forEach(c => {
             if (!c.is_completed_by_me && c.task_status !== 'completed' && c.task_deadline) {
-                const msLeft = new Date(c.task_deadline) - new Date();
-                const daysLeft = msLeft / (1000 * 60 * 60 * 24);
-                if (daysLeft <= 1) hasRed = true;
-                else if (daysLeft <= 3) hasOrange = true;
-                else hasYellow = true;
+                const daysLeft = (new Date(c.task_deadline) - new Date()) / (1000 * 60 * 60 * 24);
+                if (daysLeft <= 1) hasRed = true; else if (daysLeft <= 3) hasOrange = true; else hasYellow = true;
             }
         });
-
-        if (hasRed) {
-            taskHeaderColor = 'text-rose-500 drop-shadow-[0_0_5px_rgba(244,63,94,0.4)] animate-pulse';
-            taskArrowColor = 'text-rose-500';
-        } else if (hasOrange) {
-            taskHeaderColor = 'text-orange-500 drop-shadow-[0_0_5px_rgba(249,115,22,0.4)]';
-            taskArrowColor = 'text-orange-500';
-        } else if (hasYellow) {
-            taskHeaderColor = 'text-yellow-500 drop-shadow-[0_0_5px_rgba(234,179,8,0.4)]';
-            taskArrowColor = 'text-yellow-500';
-        }
+        if (hasRed) { taskHeaderColor = 'text-rose-500 drop-shadow-[0_0_5px_rgba(244,63,94,0.4)] animate-pulse'; taskArrowColor = 'text-rose-500'; } 
+        else if (hasOrange) { taskHeaderColor = 'text-orange-500 drop-shadow-[0_0_5px_rgba(249,115,22,0.4)]'; taskArrowColor = 'text-orange-500'; } 
+        else if (hasYellow) { taskHeaderColor = 'text-yellow-500 drop-shadow-[0_0_5px_rgba(234,179,8,0.4)]'; taskArrowColor = 'text-yellow-500'; }
     }
 
     const sidebarBg = theme === 'black' ? 'bg-[#050505] border-[#1a1a1a]' : 'bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl border-slate-200 dark:border-slate-800';
@@ -172,8 +188,6 @@ function Chat({
 
     return (
         <div className={`flex h-screen w-full ${textBase}`}>
-            
-            {/* SIDEBAR */}
             <div className={`w-64 border-r flex flex-col z-20 transition-all duration-300 ${sidebarBg}`}>
                 <div className={`p-5 border-b flex items-center gap-3 ${theme === 'black' ? 'border-[#1a1a1a]' : 'border-slate-200 dark:border-slate-800'}`}>
                     <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.5)]">
@@ -183,7 +197,6 @@ function Chat({
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-3 space-y-1 custom-scrollbar">
-                    
                     <div onClick={() => changeChat(null, false)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${activeChat === null ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-indigo-50 dark:bg-indigo-500/20 shadow-inner') : 'hover:bg-black/10 dark:hover:bg-white/5'}`}>
                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg ${activeChat === null ? 'text-indigo-400 drop-shadow-[0_0_8px_rgba(129,140,248,0.8)]' : 'text-slate-400'}`}>#</div>
                         <div className="flex-1 flex justify-between items-center pr-1">
@@ -202,10 +215,7 @@ function Chat({
                     )}
 
                     {taskChannels.length > 0 && (
-                        <div 
-                            onClick={() => setIsTasksCollapsed(!isTasksCollapsed)}
-                            className={`pb-2 flex justify-between items-center px-3 cursor-pointer hover:opacity-80 transition-opacity ${canManageTasks ? 'pt-2' : 'pt-4'}`}
-                        >
+                        <div onClick={() => setIsTasksCollapsed(!isTasksCollapsed)} className={`pb-2 flex justify-between items-center px-3 cursor-pointer hover:opacity-80 transition-opacity ${canManageTasks ? 'pt-2' : 'pt-4'}`}>
                             <h3 className={`text-[10px] font-bold tracking-[0.2em] uppercase transition-colors ${taskHeaderColor}`}>Active Tasks</h3>
                             <span className={`text-[10px] transition-colors ${taskArrowColor}`}>{isTasksCollapsed ? '▼' : '▲'}</span>
                         </div>
@@ -218,39 +228,19 @@ function Chat({
                         let hashColor = isActive ? 'bg-gradient-to-br from-cyan-500 to-blue-500 text-white shadow-[0_0_10px_rgba(6,182,212,0.4)]' : 'bg-slate-200 dark:bg-slate-800 text-slate-500';
 
                         if (c.is_completed_by_me || c.task_status === 'completed') {
-                            channelBg = isActive ? 'bg-emerald-900/40 border border-emerald-500/50' : 'bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20';
-                            textColor = 'text-emerald-500 font-bold';
-                            hashColor = 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.4)]';
-                        } 
-                        else if (c.task_deadline) {
-                            const msLeft = new Date(c.task_deadline) - new Date();
-                            const daysLeft = msLeft / (1000 * 60 * 60 * 24);
-
-                            if (daysLeft < 0) {
-                                channelBg = isActive ? 'bg-rose-900/40 border border-rose-500/50' : 'bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20';
-                                textColor = 'text-rose-500';
-                                hashColor = 'bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.4)]';
-                            } else if (daysLeft <= 1) {
-                                channelBg = isActive ? 'bg-red-900/40 border border-red-500/50' : 'bg-red-500/20 border border-red-500/40 hover:bg-red-500/30 animate-pulse';
-                                textColor = 'text-red-500 font-bold';
-                                hashColor = 'bg-red-500 text-white shadow-[0_0_10px_rgba(239,68,68,0.6)]';
-                            } else if (daysLeft <= 3) {
-                                channelBg = isActive ? 'bg-orange-900/40 border border-orange-500/50' : 'bg-orange-500/20 border border-orange-500/40 hover:bg-orange-500/30';
-                                textColor = 'text-orange-500 font-bold';
-                                hashColor = 'bg-orange-500 text-white shadow-[0_0_10px_rgba(249,115,22,0.4)]';
-                            } else {
-                                channelBg = isActive ? 'bg-yellow-900/40 border border-yellow-500/50' : 'bg-yellow-500/10 border border-yellow-500/30 hover:bg-yellow-500/20';
-                                textColor = 'text-yellow-500 font-bold';
-                                hashColor = 'bg-yellow-500 text-white shadow-[0_0_10px_rgba(234,179,8,0.4)]';
-                            }
+                            channelBg = isActive ? 'bg-emerald-900/40 border border-emerald-500/50' : 'bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20'; textColor = 'text-emerald-500 font-bold'; hashColor = 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.4)]';
+                        } else if (c.task_deadline) {
+                            const daysLeft = (new Date(c.task_deadline) - new Date()) / (1000 * 60 * 60 * 24);
+                            if (daysLeft < 0) { channelBg = isActive ? 'bg-rose-900/40 border border-rose-500/50' : 'bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20'; textColor = 'text-rose-500'; hashColor = 'bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.4)]'; } 
+                            else if (daysLeft <= 1) { channelBg = isActive ? 'bg-red-900/40 border border-red-500/50' : 'bg-red-500/20 border border-red-500/40 hover:bg-red-500/30 animate-pulse'; textColor = 'text-red-500 font-bold'; hashColor = 'bg-red-500 text-white shadow-[0_0_10px_rgba(239,68,68,0.6)]'; } 
+                            else if (daysLeft <= 3) { channelBg = isActive ? 'bg-orange-900/40 border border-orange-500/50' : 'bg-orange-500/20 border border-orange-500/40 hover:bg-orange-500/30'; textColor = 'text-orange-500 font-bold'; hashColor = 'bg-orange-500 text-white shadow-[0_0_10px_rgba(249,115,22,0.4)]'; } 
+                            else { channelBg = isActive ? 'bg-yellow-900/40 border border-yellow-500/50' : 'bg-yellow-500/10 border border-yellow-500/30 hover:bg-yellow-500/20'; textColor = 'text-yellow-500 font-bold'; hashColor = 'bg-yellow-500 text-white shadow-[0_0_10px_rgba(234,179,8,0.4)]'; }
                         }
 
                         return (
                             <div key={`channel_${c.id}`} onClick={() => changeChat(c, true)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${channelBg}`}>
                                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner transition-colors ${hashColor}`}>#</div>
-                                <div className="flex flex-col flex-1 min-w-0">
-                                    <span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span>
-                                </div>
+                                <div className="flex flex-col flex-1 min-w-0"><span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span></div>
                                 {unreadCounts[`channel_${c.id}`] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts[`channel_${c.id}`]}</span>}
                             </div>
                         );
@@ -274,30 +264,21 @@ function Chat({
                         return (
                             <div key={`channel_${c.id}`} onClick={() => changeChat(c, true)} className={`flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all ${channelBg}`}>
                                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner transition-colors ${hashColor}`}>#</div>
-                                <div className="flex flex-col flex-1 min-w-0">
-                                    <span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span>
-                                </div>
+                                <div className="flex flex-col flex-1 min-w-0"><span className={`text-sm font-semibold truncate transition-colors ${textColor}`}>{c.name}</span></div>
                                 {unreadCounts[`channel_${c.id}`] > 0 && <span className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-[0_0_10px_rgba(244,63,94,0.6)]">{unreadCounts[`channel_${c.id}`]}</span>}
                             </div>
                         );
                     })}
 
-                    <div className="pt-4 pb-2">
-                        <h3 className="text-[10px] font-bold text-slate-500 tracking-[0.2em] uppercase px-3">Encrypted DMs</h3>
-                    </div>
+                    <div className="pt-4 pb-2"><h3 className="text-[10px] font-bold text-slate-500 tracking-[0.2em] uppercase px-3">Encrypted DMs</h3></div>
 
                     {users.map(u => {
                         if (u.username === username) return null;
                         const isActive = !activeChat?.isChannel && activeChat?.id === u.id;
-                        
                         return (
                             <div key={u.id || u.username} onClick={() => changeChat(u, false)} className={`flex items-center gap-3 group p-2.5 rounded-xl cursor-pointer transition-all ${isActive ? (theme === 'black' ? 'bg-[#1a1a1a] shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]' : 'bg-slate-100 dark:bg-slate-800/80') : 'hover:bg-black/5 dark:hover:bg-white/5'}`}>
                                 <div className="relative">
-                                    {u.avatar_url ? (
-                                        <img src={u.avatar_url} alt={u.username} className={`w-8 h-8 rounded-xl object-cover transition-all ${isActive ? 'ring-2 ring-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : ''}`} />
-                                    ) : (
-                                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-slate-700 to-slate-600 flex items-center justify-center font-bold text-sm text-white shadow-inner">{u.username?.charAt(0).toUpperCase() || '?'}</div>
-                                    )}
+                                    {u.avatar_url ? <img src={u.avatar_url} alt={u.username} className={`w-8 h-8 rounded-xl object-cover transition-all ${isActive ? 'ring-2 ring-indigo-500/50 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : ''}`} /> : <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-slate-700 to-slate-600 flex items-center justify-center font-bold text-sm text-white shadow-inner">{u.username?.charAt(0).toUpperCase() || '?'}</div>}
                                     <span className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 ${theme === 'black' ? 'border-[#0a0a0a]' : 'border-white dark:border-slate-900'} ${u.status === 'Online' ? 'bg-cyan-500 shadow-[0_0_5px_rgba(6,182,212,0.8)]' : u.status === 'Away' ? 'bg-amber-500' : u.status === 'Do Not Disturb' ? 'bg-rose-500' : 'bg-slate-500'}`}></span>
                                 </div>
                                 <div className="flex flex-col flex-1 min-w-0">
@@ -313,16 +294,13 @@ function Chat({
                         {myProfile.avatar_url ? (
                             <img src={myProfile.avatar_url} alt="You" className="w-10 h-10 rounded-xl object-cover" />
                         ) : (
-                            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-400 flex items-center justify-center font-bold text-lg text-white shadow-inner">
-                                {username?.charAt(0).toUpperCase() || '?'}
-                            </div>
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-400 flex items-center justify-center font-bold text-lg text-white shadow-inner">{username?.charAt(0).toUpperCase() || '?'}</div>
                         )}
                         <div className="flex flex-col min-w-0">
                             <span className="font-bold text-sm truncate">{username}</span>
                             <span className="text-[10px] text-slate-500 hover:text-indigo-400 transition-colors uppercase tracking-wider">Edit Profile</span>
                         </div>
                     </div>
-                    
                     <div className="flex items-center gap-1">
                         <button onClick={() => { setSettingsTab('theme'); setIsSettingsOpen(true); }} className={`p-2 rounded-xl transition-colors ${theme === 'black' ? 'hover:bg-[#1a1a1a]' : 'hover:bg-slate-200 dark:hover:bg-slate-800'}`}>
                             <svg className="w-5 h-5 opacity-70 hover:opacity-100 hover:text-cyan-400 transition-all" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
@@ -343,7 +321,6 @@ function Chat({
                                 <div className="flex items-center gap-3">
                                     <span className="text-cyan-500 font-bold text-2xl drop-shadow-[0_0_5px_rgba(6,182,212,0.8)]">#</span>
                                     <h3 className="font-bold text-lg tracking-wide">{activeChat.name}</h3>
-                                    
                                     {userRole === 'admin' && (
                                         <div className="flex items-center gap-1 ml-4 border-l border-slate-200 dark:border-slate-800 pl-4">
                                             <button onClick={openEditModal} className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Edit Channel Settings">✏️</button>
@@ -514,8 +491,7 @@ function Chat({
                 activeTab={settingsTab} setActiveTab={setSettingsTab}
                 currentUser={username} userId={userId} 
                 currentAvatar={myProfile.avatar_url} currentBio={myProfile.bio} currentStatus={myProfile.status} currentRoles={myProfile.club_roles} 
-                theme={theme} setTheme={setTheme} users={users} canManageTasks={canManageTasks}
-                onLogout={onLogout} // WIRED PERFECTLY FOR SECURITY TAB!
+                theme={theme} setTheme={setTheme} users={users} canManageTasks={canManageTasks} onLogout={onLogout}
             />
 
             <TaskModal

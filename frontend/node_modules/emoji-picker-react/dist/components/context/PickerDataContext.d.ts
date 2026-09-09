@@ -1,0 +1,16 @@
+import React from 'react';
+import { DataEmoji, DataEmojis } from '../../dataUtils/DataTypes';
+import { Categories, EmojiData, SkinTones } from '../../types/exposedTypes';
+export interface PickerDataContextValue {
+    emojiData: EmojiData;
+    allEmojis: DataEmojis;
+    allEmojisByUnified: Record<string, DataEmoji>;
+    searchIndex: Record<string, Record<string, DataEmoji>>;
+    emojiByUnified: (unified?: string) => DataEmoji | undefined;
+    activeVariationFromUnified: (unified: string) => SkinTones | null;
+}
+export declare function PickerDataProvider({ children, }: {
+    children: React.ReactNode;
+}): JSX.Element;
+export declare function usePickerDataContext(): PickerDataContextValue;
+export declare function useGetEmojisByCategory(): (category: Categories) => DataEmojis;

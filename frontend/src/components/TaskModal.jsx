@@ -58,7 +58,10 @@ function TaskModal({ isOpen, onClose, theme, createTask, editTask, username, use
         if (existingTask) {
             editTask({ taskId: existingTask.id, title: title.trim(), description: description.trim(), deadline: selectedDateTime.toISOString() });
         } else {
-            if (selectionMode === 'users' && selectedUsers.length === 0) return alert("Please select at least one user.");
+            if (selectionMode === 'users' && selectedUsers.length === 0) {
+                setIsSubmitting(false);
+                return alert("Please select at least one user.");
+            }
             let finalTags = [];
             if (selectionMode === 'tags') {
                 if (tagMode === 'single') finalTags = [{ team: targetTeam, post: targetPost }];
@@ -180,14 +183,15 @@ function TaskModal({ isOpen, onClose, theme, createTask, editTask, username, use
                             </div>
                         </div>
                     )}
+                    
+                    {/* FIXED: Removed onClick from submit button to prevent double-firing! */}
+                    <div className={`p-5 border-t flex justify-end gap-3 ${headerBg} sticky bottom-0`}>
+                        <button type="button" onClick={onClose} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>Cancel</button>
+                        <button type="submit" disabled={isSubmitting || !title.trim() || !deadlineDate} className={`px-6 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 flex items-center gap-2 ${theme === 'black' ? 'bg-amber-600 hover:bg-amber-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.2)]' : 'bg-amber-500 hover:bg-amber-600 text-white shadow-md shadow-amber-500/20'}`}>
+                            {isSubmitting ? 'Saving...' : (existingTask ? 'Save Changes' : 'Dispatch Task')}
+                        </button>
+                    </div>
                 </form>
-
-                <div className={`p-5 border-t flex justify-end gap-3 ${headerBg}`}>
-                    <button type="button" onClick={onClose} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>Cancel</button>
-                    <button type="submit" onClick={handleSubmit} disabled={isSubmitting || !title.trim() || !deadlineDate} className={`px-6 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 flex items-center gap-2 ${theme === 'black' ? 'bg-amber-600 hover:bg-amber-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.2)]' : 'bg-amber-500 hover:bg-amber-600 text-white shadow-md shadow-amber-500/20'}`}>
-                        {isSubmitting ? 'Saving...' : (existingTask ? 'Save Changes' : 'Dispatch Task')}
-                    </button>
-                </div>
             </div>
         </div>
     );
