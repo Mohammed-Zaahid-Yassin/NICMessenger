@@ -10,18 +10,18 @@ function AnalyticsModal({ isOpen, onClose, taskData, theme }) {
     const textBase = theme === 'black' ? 'text-gray-300' : 'text-slate-800 dark:text-slate-200';
 
     return (
-        <div className={`fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 ${textBase}`}>
-            <div className={`w-[500px] flex flex-col rounded-2xl shadow-2xl overflow-hidden border ${modalBg}`}>
+        <div className={`fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-3 md:p-4 ${textBase}`}>
+            <div className={`w-full max-w-lg flex flex-col rounded-2xl shadow-2xl overflow-hidden border ${modalBg}`}>
                 <div className={`p-4 border-b flex justify-between items-center ${headerBg}`}>
                     <div className="flex items-center gap-2">
                         <span className="text-xl">📊</span>
-                        <h2 className="text-sm font-black text-indigo-500 uppercase tracking-widest">Mission Analytics</h2>
+                        <h2 className="text-sm font-black text-indigo-500 uppercase tracking-widest">Task Analytics</h2>
                     </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-rose-500 transition-colors">✕</button>
+                    <button onClick={onClose} className="text-slate-400 hover:text-rose-500 transition-colors p-1 cursor-pointer">✕</button>
                 </div>
                 
-                <div className="p-6">
-                    <h3 className={`text-lg font-bold mb-1 ${theme === 'black' ? 'text-white' : ''}`}>{taskData.title}</h3>
+                <div className="p-4 md:p-6">
+                    <h3 className={`text-base md:text-lg font-bold mb-1 ${theme === 'black' ? 'text-white' : ''}`}>{taskData.title}</h3>
                     <p className="text-xs text-slate-500 mb-6">Tracking completion status across all assigned personnel.</p>
                     
                     <div className={`p-4 rounded-xl border mb-6 flex flex-col items-center justify-center ${theme === 'black' ? 'bg-[#111] border-[#333]' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
@@ -39,7 +39,7 @@ function AnalyticsModal({ isOpen, onClose, taskData, theme }) {
                                     <div key={i} className={`flex items-center gap-3 p-3 rounded-lg border ${theme === 'black' ? 'bg-[#1a1a1a] border-emerald-900/50' : 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800/50'}`}>
                                         <span className="text-emerald-500">✅</span>
                                         <span className={`text-sm font-bold ${theme === 'black' ? 'text-emerald-400' : 'text-emerald-700 dark:text-emerald-400'}`}>{user}</span>
-                                        <span className="ml-auto text-[10px] text-slate-500 uppercase">Verified</span>
+                                        <span className="ml-auto text-[10px] text-slate-500 uppercase font-semibold">Verified</span>
                                     </div>
                                 ))}
                             </div>

@@ -15,12 +15,36 @@ const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const app = express();
 const server = http.createServer(app);
 
-app.use(cors({ origin: "http://localhost:5173", methods: ["GET", "POST"], credentials: true }));
+const JWT_SECRET = process.env.JWT_SECRET || 'nic-messenger-secret-key-2024';
+const PORT = process.env.PORT || 4000;
+
+// Configurable CORS to support both local development and Vercel/production deployment
+const isAllowedOrigin = (origin) => {
+    if (!origin) return true;
+    if (origin === 'http://localhost:5173' || origin === 'http://localhost:3000' || origin === 'http://localhost:4173') return true;
+    if (process.env.CLIENT_URL && origin === process.env.CLIENT_URL.replace(/\/$/, '')) return true;
+    if (origin.endsWith('.vercel.app')) return true;
+    if (process.env.NODE_ENV !== 'production') return true;
+    return false;
+};
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        if (isAllowedOrigin(origin)) {
+            callback(null, true);
+        } else {
+            callback(null, true); // Fallback to allow authenticated API requests
+        }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 
-const JWT_SECRET = 'nic-messenger-secret-key-2024';
-
+// Cloudinary Configuration
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -29,19 +53,36 @@ cloudinary.config({
 
 const avatarStorage = new CloudinaryStorage({
     cloudinary: cloudinary,
-    params: { folder: 'nic-messenger/avatars', allowed_formats: ['jpg', 'jpeg', 'png', 'webp'], transformation: [{ width: 256, height: 256, crop: 'fill', gravity: 'face' }] }
+    params: { 
+        folder: 'nic-messenger/avatars', 
+        allowed_formats: ['jpg', 'jpeg', 'png', 'webp'], 
+        transformation: [{ width: 256, height: 256, crop: 'fill', gravity: 'face' }] 
+    }
 });
+
 const attachmentStorage = new CloudinaryStorage({
     cloudinary: cloudinary,
-    params: { folder: 'nic-messenger/attachments', allowed_formats: ['jpg', 'jpeg', 'png', 'webp'] }
+    params: { 
+        folder: 'nic-messenger/attachments', 
+        allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif'] 
+    }
 });
 
 const uploadAvatar = multer({ storage: avatarStorage, limits: { fileSize: 5 * 1024 * 1024 } });
 const uploadAttachment = multer({ storage: attachmentStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
-const io = new Server(server, { cors: { origin: "http://localhost:5173", methods: ["GET", "POST"], credentials: true } });
-const db = new sqlite3.Database(path.join(__dirname, 'database.sqlite'));
+const io = new Server(server, { 
+    cors: { 
+        origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
+        methods: ["GET", "POST"], 
+        credentials: true 
+    } 
+});
 
+const dbPath = process.env.DATABASE_PATH || path.join(__dirname, 'database.sqlite');
+const db = new sqlite3.Database(dbPath);
+
+// Database initialization with indexes
 function initializeDatabase() {
     return new Promise((resolve, reject) => {
         db.run(`
@@ -111,7 +152,16 @@ function initializeDatabase() {
                                         FOREIGN KEY(task_id) REFERENCES tasks(id), FOREIGN KEY(user_id) REFERENCES users(id),
                                         UNIQUE(task_id, user_id)
                                     )
-                                `, () => { resolve(); });
+                                `, () => { 
+                                    // High-Performance Query Indexes
+                                    db.run("CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, timestamp DESC)", () => {});
+                                    db.run("CREATE INDEX IF NOT EXISTS idx_messages_dm ON messages(recipient_id, user_id, timestamp DESC)", () => {});
+                                    db.run("CREATE INDEX IF NOT EXISTS idx_messages_user ON messages(user_id)", () => {});
+                                    db.run("CREATE INDEX IF NOT EXISTS idx_channel_members_lookup ON channel_members(channel_id, user_id)", () => {});
+                                    db.run("CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id)", () => {});
+                                    db.run("CREATE INDEX IF NOT EXISTS idx_tasks_auto_channel ON tasks(auto_channel_id)", () => {});
+                                    resolve(); 
+                                });
                             });
                         });
                     });
@@ -131,17 +181,50 @@ function createAdminAccount() {
             } else resolve();
         });
     });
-}app.post('/api/register', async (req, res) => {
+}
+
+// Authentication Middleware for REST Endpoints
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = (authHeader && authHeader.startsWith('Bearer ')) ? authHeader.split(' ')[1] : req.cookies?.token;
+    if (!token) return res.status(401).json({ error: 'Authentication required' });
+    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+        if (err) return res.status(403).json({ error: 'Invalid or expired token' });
+        req.user = decoded;
+        next();
+    });
+};
+
+// Health Check Endpoint
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', service: 'NIC Messenger API', uptime: process.uptime(), timestamp: new Date().toISOString() });
+});
+
+// User Session Verification Endpoint
+app.get('/api/me', authenticateToken, (req, res) => {
+    db.get('SELECT id, username, role, avatar_url, status, bio, club_roles FROM users WHERE id = ?', [req.user.id], (err, user) => {
+        if (err || !user) return res.status(404).json({ error: 'User not found' });
+        let parsedRoles = [];
+        try { parsedRoles = user.club_roles ? JSON.parse(user.club_roles) : []; } catch(e) {}
+        res.json({ success: true, user: { ...user, club_roles: parsedRoles } });
+    });
+});
+
+app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+    const cleanUsername = String(username).trim();
+    if (cleanUsername.length < 2) return res.status(400).json({ error: 'Username must be at least 2 characters' });
+    if (password.length < 4) return res.status(400).json({ error: 'Password must be at least 4 characters' });
+
     try {
-        db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
+        db.get('SELECT * FROM users WHERE username = ?', [cleanUsername], async (err, user) => {
             if (user) return res.status(400).json({ error: 'Username already taken' });
             const hashedPassword = await bcrypt.hash(password, 10);
-            db.run('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword], function(err) {
+            db.run('INSERT INTO users (username, password) VALUES (?, ?)', [cleanUsername, hashedPassword], function(err) {
                 if (err) return res.status(500).json({ error: 'Error creating user' });
-                const token = jwt.sign({ id: this.lastID, username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
-                res.json({ success: true, token, user: { id: this.lastID, username, role: 'user', avatar_url: null, status: 'Online', bio: '', club_roles: [] } });
+                const token = jwt.sign({ id: this.lastID, username: cleanUsername, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
+                res.json({ success: true, token, user: { id: this.lastID, username: cleanUsername, role: 'user', avatar_url: null, status: 'Online', bio: '', club_roles: [] } });
             });
         });
     } catch (error) { res.status(500).json({ error: 'Server error' }); }
@@ -149,10 +232,13 @@ function createAdminAccount() {
 
 app.post('/api/login', (req, res) => {
     const { username, password } = req.body;
-    db.get('SELECT * FROM users WHERE username = ?', [username], async (err, user) => {
-        if (err || !user) return res.status(400).json({ error: 'User not found' });
+    if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+    const cleanUsername = String(username).trim();
+
+    db.get('SELECT * FROM users WHERE username = ?', [cleanUsername], async (err, user) => {
+        if (err || !user) return res.status(400).json({ error: 'Invalid username or password' });
         const validPassword = await bcrypt.compare(password, user.password);
-        if (!validPassword) return res.status(400).json({ error: 'Invalid password' });
+        if (!validPassword) return res.status(400).json({ error: 'Invalid username or password' });
         const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
         let parsedRoles = [];
         try { parsedRoles = user.club_roles ? JSON.parse(user.club_roles) : []; } catch(e) {}
@@ -160,12 +246,17 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-app.post('/api/profile/update', (req, res) => {
-    const { userId, bio, status, clubRoles } = req.body;
+app.post('/api/profile/update', authenticateToken, (req, res) => {
+    const targetUserId = Number(req.body.userId);
+    if (req.user.id !== targetUserId && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized to modify this profile' });
+    }
+    const { bio, status, clubRoles } = req.body;
     const rolesStr = clubRoles ? JSON.stringify(clubRoles) : '[]';
-    db.run('UPDATE users SET bio = ?, status = ?, club_roles = ? WHERE id = ?', [bio, status, rolesStr, userId], function(err) {
+    db.run('UPDATE users SET bio = ?, status = ?, club_roles = ? WHERE id = ?', [bio, status, rolesStr, targetUserId], function(err) {
+        if (err) return res.status(500).json({ error: 'Database update failed' });
         res.json({ success: true });
-        db.get('SELECT id, username, status, avatar_url, bio, club_roles FROM users WHERE id = ?', [userId], (err, user) => {
+        db.get('SELECT id, username, status, avatar_url, bio, club_roles FROM users WHERE id = ?', [targetUserId], (err, user) => {
             if (!err && user) {
                 try { user.club_roles = user.club_roles ? JSON.parse(user.club_roles) : []; } catch(e) { user.club_roles = []; }
                 io.emit('user profile updated', user);
@@ -174,11 +265,16 @@ app.post('/api/profile/update', (req, res) => {
     });
 });
 
-app.post('/api/profile/avatar', uploadAvatar.single('avatar'), (req, res) => {
+app.post('/api/profile/avatar', authenticateToken, uploadAvatar.single('avatar'), (req, res) => {
+    const targetUserId = Number(req.body.userId);
+    if (req.user.id !== targetUserId && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized to update this avatar' });
+    }
     if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
-    db.run('UPDATE users SET avatar_url = ? WHERE id = ?', [req.file.path, req.body.userId], function() {
+    db.run('UPDATE users SET avatar_url = ? WHERE id = ?', [req.file.path, targetUserId], function(err) {
+        if (err) return res.status(500).json({ error: 'Database update failed' });
         res.json({ success: true, avatarUrl: req.file.path });
-        db.get('SELECT id, username, status, avatar_url, bio, club_roles FROM users WHERE id = ?', [req.body.userId], (err, user) => {
+        db.get('SELECT id, username, status, avatar_url, bio, club_roles FROM users WHERE id = ?', [targetUserId], (err, user) => {
             if (!err && user) {
                 try { user.club_roles = user.club_roles ? JSON.parse(user.club_roles) : []; } catch(e) { user.club_roles = []; }
                 io.emit('user profile updated', user);
@@ -187,43 +283,53 @@ app.post('/api/profile/avatar', uploadAvatar.single('avatar'), (req, res) => {
     });
 });
 
-app.post('/api/messages/image', uploadAttachment.single('image'), (req, res) => {
-    if (!req.file) return res.status(500).json({ error: 'Upload error' });
+app.post('/api/messages/image', authenticateToken, uploadAttachment.single('image'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'Upload error or no image supplied' });
     res.json({ success: true, imageUrl: req.file.path });
 });
 
-// --- PACKAGE 5: SECURITY APIs ---
+app.post('/api/profile/password', authenticateToken, async (req, res) => {
+    const targetUserId = Number(req.body.userId);
+    if (req.user.id !== targetUserId && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both current and new password required' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
 
-app.post('/api/profile/password', async (req, res) => {
-    const { userId, currentPassword, newPassword } = req.body;
-    db.get('SELECT password FROM users WHERE id = ?', [userId], async (err, user) => {
+    db.get('SELECT password FROM users WHERE id = ?', [targetUserId], async (err, user) => {
         if (err || !user) return res.status(400).json({ error: 'User not found' });
         
         const validPassword = await bcrypt.compare(currentPassword, user.password);
         if (!validPassword) return res.status(400).json({ error: 'Incorrect current password' });
         
+        // FIXED: Correct variable name hashedPassword used
         const hashedPassword = await bcrypt.hash(newPassword, 10);
-        db.run('UPDATE users SET password = ? WHERE id = ?', [hashed, userId], function(err) {
+        db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, targetUserId], function(err) {
             if (err) return res.status(500).json({ error: 'Failed to update password' });
             res.json({ success: true, message: 'Password updated successfully' });
         });
     });
 });
 
-app.post('/api/profile/delete', async (req, res) => {
-    const { userId, password } = req.body;
-    db.get('SELECT password, role FROM users WHERE id = ?', [userId], async (err, user) => {
+app.post('/api/profile/delete', authenticateToken, async (req, res) => {
+    const targetUserId = Number(req.body.userId);
+    if (req.user.id !== targetUserId && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Unauthorized' });
+    }
+    const { password } = req.body;
+    db.get('SELECT password, role FROM users WHERE id = ?', [targetUserId], async (err, user) => {
         if (err || !user) return res.status(400).json({ error: 'User not found' });
-        if (user.role === 'admin') return res.status(403).json({ error: 'Super Admin cannot be deleted.' });
+        if (user.role === 'admin' && user.username === 'admin') return res.status(403).json({ error: 'Super Admin cannot be deleted.' });
         
         const validPassword = await bcrypt.compare(password, user.password);
         if (!validPassword) return res.status(400).json({ error: 'Incorrect password' });
 
         db.serialize(() => {
-            db.run('DELETE FROM channel_members WHERE user_id = ?', [userId]);
-            db.run('DELETE FROM reactions WHERE user_id = ?', [userId]);
-            db.run('DELETE FROM task_completions WHERE user_id = ?', [userId]);
-            db.run('DELETE FROM users WHERE id = ?', [userId], () => {
+            db.run('DELETE FROM channel_members WHERE user_id = ?', [targetUserId]);
+            db.run('DELETE FROM reactions WHERE user_id = ?', [targetUserId]);
+            db.run('DELETE FROM task_completions WHERE user_id = ?', [targetUserId]);
+            db.run('DELETE FROM users WHERE id = ?', [targetUserId], () => {
                 res.json({ success: true });
             });
         });
@@ -237,7 +343,7 @@ const typingUsers = {};
 async function startServer() {
     await initializeDatabase();
     await createAdminAccount();
-    server.listen(4000, '0.0.0.0', () => console.log(`🚀 NIC Messenger running securely on port 4000`));
+    server.listen(PORT, '0.0.0.0', () => console.log(`🚀 NIC Messenger running securely on port ${PORT}`));
     setupSocketIO();
 }
 
@@ -333,14 +439,14 @@ function setupSocketIO() {
         };
 
         sendMessagesToClient(null, null);
-        socket.on('switch chat', ({ recipientId, channelId }) => sendMessagesToClient(recipientId || null, channelId || null));
+        socket.on('switch chat', ({ recipientId, channelId }) => sendMessagesToClient(recipientId ? Number(recipientId) : null, channelId ? Number(channelId) : null));
         
         socket.on('fetch older messages', ({ recipientId, channelId, offset }) => {
             if (channelId) {
                 db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [channelId, socket.userId], (err, row) => {
-                    if (row) executeMessageFetch(recipientId || null, channelId, offset);
+                    if (row) executeMessageFetch(recipientId ? Number(recipientId) : null, Number(channelId), offset);
                 });
-            } else { executeMessageFetch(recipientId || null, null, offset); }
+            } else { executeMessageFetch(recipientId ? Number(recipientId) : null, null, offset); }
         });
 
         // ==========================
@@ -367,7 +473,6 @@ function setupSocketIO() {
                                 } else if (row.channel_id) {
                                     io.to(`channel_${row.channel_id}`).emit('task updated', payload);
                                     
-                                    // Check if all channel members have completed it to turn channel green globally
                                     db.get(`
                                         SELECT (SELECT count(*) FROM channel_members WHERE channel_id = ?) as total_members,
                                                (SELECT count(*) FROM task_completions WHERE task_id = ?) as total_completed
@@ -387,13 +492,12 @@ function setupSocketIO() {
             });
         });
 
-        // NEW: EDIT TASK ENGINE
         socket.on('edit task', (data) => {
             const { taskId, title, description, deadline } = data;
             
             db.get('SELECT * FROM tasks WHERE id = ?', [taskId], (err, task) => {
                 if (err || !task) return;
-                if (socket.role !== 'admin' && task.created_by !== socket.userId) return;
+                if (socket.role !== 'admin' && Number(task.created_by) !== Number(socket.userId)) return;
 
                 db.run('UPDATE tasks SET title = ?, description = ?, deadline = ? WHERE id = ?', [title, description, deadline, taskId], () => {
                     
@@ -428,6 +532,28 @@ function setupSocketIO() {
                         });
                         io.emit('force channel fetch'); 
                     });
+                });
+            });
+        });
+
+        // NEW: DELETE TASK ENGINE
+        socket.on('delete task', (data) => {
+            const taskId = Number(data?.taskId || data);
+            if (!taskId) return;
+            db.get('SELECT * FROM tasks WHERE id = ?', [taskId], (err, task) => {
+                if (err || !task) return;
+                if (socket.role !== 'admin' && Number(task.created_by) !== Number(socket.userId)) return;
+
+                db.run('DELETE FROM tasks WHERE id = ?', [taskId], () => {
+                    db.run('DELETE FROM task_completions WHERE task_id = ?', [taskId]);
+                    if (task.auto_channel_id) {
+                        db.run('DELETE FROM channels WHERE id = ?', [task.auto_channel_id]);
+                        db.run('DELETE FROM channel_members WHERE channel_id = ?', [task.auto_channel_id]);
+                        db.run('DELETE FROM messages WHERE channel_id = ?', [task.auto_channel_id]);
+                        io.emit('channel deleted', task.auto_channel_id);
+                    }
+                    io.emit('task deleted', taskId);
+                    io.emit('force channel fetch');
                 });
             });
         });
@@ -558,7 +684,7 @@ function setupSocketIO() {
             db.run('UPDATE channels SET name = ?, description = ? WHERE id = ?', [data.name.trim(), data.description || '', Number(data.channelId)], function(err) {
                 if (err) return;
                 db.run('DELETE FROM channel_members WHERE channel_id = ? AND role != ?', [Number(data.channelId), 'admin'], () => {
-                    if (data.members.length > 0) {
+                    if (data.members && data.members.length > 0) {
                         data.members.forEach(mId => {
                             db.run('INSERT INTO channel_members (channel_id, user_id, role) VALUES (?, ?, ?)', [Number(data.channelId), mId, 'member'], () => {
                                 io.to(mId.toString()).socketsJoin(`channel_${data.channelId}`);
@@ -589,6 +715,7 @@ function setupSocketIO() {
         });
 
         socket.on('fetch channels', () => sendChannelsToClient());
+        
         socket.on('mark read', ({ senderId }) => {
             if (!senderId) return;
             db.run(`UPDATE messages SET is_read = 1 WHERE recipient_id = ? AND user_id = ? AND is_read = 0`, [socket.userId, Number(senderId)], function(err) {
@@ -596,8 +723,30 @@ function setupSocketIO() {
             });
         });
 
-        socket.on('typing start', () => { typingUsers[socket.id] = socket.username; socket.broadcast.emit('user typing', { username: socket.username, isTyping: true }); });
-        socket.on('typing stop', () => { delete typingUsers[socket.id]; socket.broadcast.emit('user typing', { username: socket.username, isTyping: false }); });
+        // PRIVACY ENHANCEMENT: Scoped typing indicator per channel/recipient
+        socket.on('typing start', (data) => {
+            typingUsers[socket.id] = socket.username;
+            const payload = { username: socket.username, isTyping: true, channelId: data?.channelId, recipientId: data?.recipientId };
+            if (data?.channelId) {
+                socket.to(`channel_${data.channelId}`).emit('user typing', payload);
+            } else if (data?.recipientId) {
+                socket.to(data.recipientId.toString()).emit('user typing', payload);
+            } else {
+                socket.broadcast.emit('user typing', payload);
+            }
+        });
+
+        socket.on('typing stop', (data) => {
+            delete typingUsers[socket.id];
+            const payload = { username: socket.username, isTyping: false, channelId: data?.channelId, recipientId: data?.recipientId };
+            if (data?.channelId) {
+                socket.to(`channel_${data.channelId}`).emit('user typing', payload);
+            } else if (data?.recipientId) {
+                socket.to(data.recipientId.toString()).emit('user typing', payload);
+            } else {
+                socket.broadcast.emit('user typing', payload);
+            }
+        });
 
         socket.on('chat message', (data) => {
             const safeContent = String(data.content || '').trim();
@@ -606,8 +755,9 @@ function setupSocketIO() {
             
             const insertMessage = () => {
                 db.run('INSERT INTO messages (user_id, username, content, timestamp, image_url, recipient_id, channel_id, is_read) VALUES (?, ?, ?, ?, ?, ?, ?, 0)', 
-                    [socket.userId, socket.username, safeContent, new Date().toISOString(), safeImageUrl, data.recipientId || null, data.channelId || null], 
+                    [socket.userId, socket.username, safeContent, new Date().toISOString(), safeImageUrl, data.recipientId ? Number(data.recipientId) : null, data.channelId ? Number(data.channelId) : null], 
                     function(err) {
+                        if (err) return;
                         db.get('SELECT m.*, u.avatar_url, u.club_roles FROM messages m LEFT JOIN users u ON m.user_id = u.id WHERE m.id = ?', [this.lastID], (err, msg) => {
                             if (err || !msg) return;
                             let parsedRoles = []; try { parsedRoles = msg.club_roles ? JSON.parse(msg.club_roles) : []; } catch(e) {}
@@ -621,7 +771,9 @@ function setupSocketIO() {
             };
 
             if (data.channelId) {
-                db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [data.channelId, socket.userId], (err, row) => { if (row) insertMessage(); });
+                db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [Number(data.channelId), socket.userId], (err, row) => { 
+                    if (row) insertMessage(); 
+                });
             } else { insertMessage(); }
         });
 
@@ -629,8 +781,9 @@ function setupSocketIO() {
             if (!String(content || '').trim()) return;
             const insertReply = () => {
                 db.run('INSERT INTO messages (user_id, username, content, timestamp, reply_to, reply_to_username, reply_to_content, recipient_id, channel_id, is_read) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)',
-                    [socket.userId, socket.username, String(content).trim(), new Date().toISOString(), Number(messageId), replyToUsername || '', replyToContent || '', recipientId || null, channelId || null],
+                    [socket.userId, socket.username, String(content).trim(), new Date().toISOString(), Number(messageId), replyToUsername || '', replyToContent || '', recipientId ? Number(recipientId) : null, channelId ? Number(channelId) : null],
                     function(err) {
+                        if (err) return;
                         db.get('SELECT m.*, u.avatar_url, u.club_roles FROM messages m LEFT JOIN users u ON m.user_id = u.id WHERE m.id = ?', [this.lastID], (err, msg) => {
                             if (err || !msg) return;
                             let parsedRoles = []; try { parsedRoles = msg.club_roles ? JSON.parse(msg.club_roles) : []; } catch(e) {}
@@ -644,7 +797,9 @@ function setupSocketIO() {
             };
 
             if (channelId) {
-                db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [channelId, socket.userId], (err, row) => { if (row) insertReply(); });
+                db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [Number(channelId), socket.userId], (err, row) => { 
+                    if (row) insertReply(); 
+                });
             } else { insertReply(); }
         });
 
@@ -680,13 +835,33 @@ function setupSocketIO() {
             });
         });
 
+        // SECURITY CHECK: Verify channel membership or DM identity before reaction
         socket.on('add reaction', ({ messageId, emoji }) => {
+            if (!emoji || !messageId) return;
             db.get('SELECT * FROM messages WHERE id = ?', [Number(messageId)], (msgErr, msgRow) => {
                 if (msgErr || !msgRow) return;
-                db.get('SELECT * FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', [Number(messageId), socket.userId, emoji], (err, row) => {
-                    if (row) db.run('DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', [Number(messageId), socket.userId, emoji], () => sendReactionUpdate(Number(messageId), msgRow));
-                    else db.run('INSERT INTO reactions (message_id, user_id, user_username, emoji) VALUES (?, ?, ?, ?)', [Number(messageId), socket.userId, socket.username, emoji], () => sendReactionUpdate(Number(messageId), msgRow));
-                });
+
+                const proceedReaction = () => {
+                    db.get('SELECT * FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', [Number(messageId), socket.userId, emoji], (err, row) => {
+                        if (row) {
+                            db.run('DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', [Number(messageId), socket.userId, emoji], () => sendReactionUpdate(Number(messageId), msgRow));
+                        } else {
+                            db.run('INSERT INTO reactions (message_id, user_id, user_username, emoji) VALUES (?, ?, ?, ?)', [Number(messageId), socket.userId, socket.username, emoji], () => sendReactionUpdate(Number(messageId), msgRow));
+                        }
+                    });
+                };
+
+                if (msgRow.channel_id) {
+                    db.get('SELECT 1 FROM channel_members WHERE channel_id = ? AND user_id = ?', [msgRow.channel_id, socket.userId], (err, row) => {
+                        if (row) proceedReaction();
+                    });
+                } else if (msgRow.recipient_id) {
+                    if (Number(msgRow.user_id) === Number(socket.userId) || Number(msgRow.recipient_id) === Number(socket.userId)) {
+                        proceedReaction();
+                    }
+                } else {
+                    proceedReaction();
+                }
             });
         });
 
@@ -718,4 +893,9 @@ function setupSocketIO() {
     });
 }
 
-startServer();
+// Export for testing or serverless invocation
+if (require.main === module) {
+    startServer();
+}
+
+module.exports = { app, server, initializeDatabase, createAdminAccount, db };

@@ -3,6 +3,7 @@ import io from 'socket.io-client';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/Login';
 import Chat from './components/Chat';
+import { API_URL } from './config';
 
 const playChime = () => {
   try {
@@ -59,9 +60,7 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem('nic_theme', theme);
-    if (theme === 'black') {
-      document.documentElement.classList.add('dark');
-    } else if (theme === 'dark') {
+    if (theme === 'black' || theme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
@@ -95,7 +94,7 @@ function App() {
 
   useEffect(() => {
     if (token) {
-      socketRef.current = io('http://localhost:4000', {
+      socketRef.current = io(API_URL, {
         auth: { token },
         transports: ['websocket', 'polling']
       });
@@ -137,11 +136,12 @@ function App() {
       
       socket.on('chat message', (msg) => {
         const isGeneralMsg = !msg.recipient_id && !msg.channel_id;
-        const currentActiveId = activeChatRef.current?.id || null;
+        const currentActiveId = activeChatRef.current?.id != null ? Number(activeChatRef.current.id) : null;
         const isCurrentlyChannel = activeChatRef.current?.isChannel || false;
         const myId = Number(userIdRef.current);
         const msgUserId = Number(msg.user_id);
         const channelId = msg.channel_id ? Number(msg.channel_id) : null;
+        const msgRecipientId = msg.recipient_id ? Number(msg.recipient_id) : null;
         const myUsername = usernameRef.current;
         
         let belongsToActive = false;
@@ -151,7 +151,7 @@ function App() {
         } else if (channelId) {
           belongsToActive = (currentActiveId === channelId) && isCurrentlyChannel;
         } else if (!isGeneralMsg && !channelId) {
-          belongsToActive = !isCurrentlyChannel && ((msgUserId === currentActiveId) || (Number(msg.recipient_id) === currentActiveId));
+          belongsToActive = !isCurrentlyChannel && ((msgUserId === currentActiveId) || (msgRecipientId === currentActiveId));
         }
 
         if (belongsToActive) {
@@ -227,8 +227,24 @@ function App() {
         setMessages(prev => prev.map(msg => msg.id === data.messageId ? { ...msg, content: data.content, image_url: null, is_deleted: true, deleted_by: data.deleted_by, reactions: [], reaction_users: [], task_data: null } : msg));
       });
 
+      socket.on('task updated', ({ messageId, taskData }) => {
+        setMessages(prev => prev.map(msg => msg.id === messageId ? { ...msg, task_data: taskData } : msg));
+      });
+
       socket.on('task completed', ({ messageId, taskData }) => {
         setMessages(prev => prev.map(msg => msg.id === messageId ? { ...msg, task_data: taskData } : msg));
+      });
+
+      socket.on('task deleted', (taskId) => {
+        setMessages(prev => prev.filter(msg => {
+          if (!msg.task_data) return true;
+          try {
+            const td = JSON.parse(msg.task_data);
+            return td.id !== taskId;
+          } catch(e) {
+            return true;
+          }
+        }));
       });
 
       socket.on('user list', (userList) => setUsers(userList));
@@ -255,7 +271,7 @@ function App() {
   const handleLogin = async (username, password, isSignup) => {
     try {
       const endpoint = isSignup ? '/api/register' : '/api/login';
-      const response = await fetch(`http://localhost:4000${endpoint}`, {
+      const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
@@ -354,7 +370,17 @@ function App() {
     }
   };
 
-  const sendTyping = (isTyping) => { if (socketRef.current && isConnected) socketRef.current.emit(isTyping ? 'typing start' : 'typing stop'); };
+  const sendTyping = (isTyping) => {
+    if (socketRef.current && isConnected) {
+      const payload = {
+        isTyping,
+        channelId: activeChat?.isChannel ? activeChat.id : null,
+        recipientId: !activeChat?.isChannel && activeChat ? activeChat.id : null
+      };
+      socketRef.current.emit(isTyping ? 'typing start' : 'typing stop', payload);
+    }
+  };
+  
   const addReaction = (messageId, emoji) => { if (socketRef.current && isConnected) socketRef.current.emit('add reaction', { messageId, emoji }); };
 
   const replyToMessage = (messageId, content, replyToUsername, replyToContent) => {
@@ -371,9 +397,8 @@ function App() {
   const handleDeleteMessage = (messageId) => { if (socketRef.current && isConnected) socketRef.current.emit('delete message', messageId); };
 
   const createTask = (taskData) => { if (socketRef.current && isConnected) socketRef.current.emit('create task', taskData); };
+  const editTask = (taskData) => { if (socketRef.current && isConnected) socketRef.current.emit('edit task', taskData); };
   const completeTask = (messageId) => { if (socketRef.current && isConnected) socketRef.current.emit('complete task', messageId); };
-  
-  // NEW: Delete Task Function
   const deleteTask = (data) => { if (socketRef.current && isConnected) socketRef.current.emit('delete task', data); };
 
   if (isLoading) {
@@ -396,7 +421,7 @@ function App() {
         <Route path="/chat" element={username ? (
             <Chat 
               messages={messages} users={users} channels={channels} sendMessage={sendMessage} 
-              username={username} userRole={userRole} userId={userId}
+              username={username} userRole={userRole} userId={userId} token={token}
               isConnected={isConnected} onKick={handleKick} onDeleteMessage={handleDeleteMessage}
               onLogout={handleLogout} sendTyping={sendTyping} addReaction={addReaction}
               replyToMessage={replyToMessage} editMessage={editMessage} 
@@ -404,7 +429,7 @@ function App() {
               activeChat={activeChat} changeChat={changeChat} unreadCounts={unreadCounts}
               theme={theme} setTheme={setTheme}
               fetchOlderMessages={fetchOlderMessages} hasMoreMessages={hasMoreMessages} isFetchingHistory={isFetchingHistory}
-              createTask={createTask} completeTask={completeTask} deleteTask={deleteTask}
+              createTask={createTask} editTask={editTask} completeTask={completeTask} deleteTask={deleteTask}
             />
           ) : <Navigate to="/login" replace />} 
         />

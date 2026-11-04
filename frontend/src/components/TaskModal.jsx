@@ -26,11 +26,13 @@ function TaskModal({ isOpen, onClose, theme, createTask, editTask, username, use
 
     useEffect(() => {
         if (existingTask) {
-            setTitle(existingTask.title);
-            setDescription(existingTask.description);
-            const d = new Date(existingTask.deadline);
-            setDeadlineDate(d.toISOString().split('T')[0]);
-            setDeadlineTime(d.toTimeString().slice(0, 5));
+            setTitle(existingTask.title || '');
+            setDescription(existingTask.description || '');
+            if (existingTask.deadline) {
+                const d = new Date(existingTask.deadline);
+                setDeadlineDate(d.toISOString().split('T')[0]);
+                setDeadlineTime(d.toTimeString().slice(0, 5));
+            }
         } else {
             setTitle(''); setDescription(''); setDeadlineDate(''); setDeadlineTime('');
         }
@@ -79,115 +81,96 @@ function TaskModal({ isOpen, onClose, theme, createTask, editTask, username, use
     const today = new Date().toISOString().split('T')[0];
     const modalBg = theme === 'black' ? 'bg-[#0a0a0a] border-[#222]' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700';
     const headerBg = theme === 'black' ? 'bg-[#050505] border-[#1a1a1a]' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800';
-    const inputBg = theme === 'black' ? 'bg-[#111] border-[#333] focus:border-amber-500 text-white' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 focus:border-indigo-500';
+    const inputBg = theme === 'black' ? 'bg-[#111] border-[#333] focus:border-amber-500 text-white' : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 focus:border-indigo-500 text-slate-800 dark:text-slate-100';
     const textBase = theme === 'black' ? 'text-gray-300' : 'text-slate-800 dark:text-slate-200';
 
     return (
-        <div className={`fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 ${textBase}`}>
-            <div className={`w-[600px] flex flex-col rounded-2xl shadow-2xl overflow-hidden border max-h-[90vh] ${modalBg}`}>
-                <div className={`p-5 border-b flex justify-between items-center ${headerBg}`}>
+        <div className={`fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-2 md:p-4 ${textBase}`}>
+            <div className={`w-full max-w-xl flex flex-col rounded-2xl shadow-2xl overflow-hidden border max-h-[90vh] ${modalBg}`}>
+                <div className={`p-4 md:p-5 border-b flex justify-between items-center ${headerBg}`}>
                     <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.4)]">
                             <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
                         </div>
-                        <h2 className="text-sm font-black text-amber-500 uppercase tracking-widest">{existingTask ? 'Modify Mission' : 'Dispatch New Task'}</h2>
+                        <h2 className="text-xs md:text-sm font-black text-amber-500 uppercase tracking-widest">{existingTask ? 'Modify Task' : 'Dispatch New Task'}</h2>
                     </div>
-                    <button onClick={onClose} className="text-slate-400 hover:text-rose-500 transition-colors">✕</button>
+                    <button onClick={onClose} className="text-slate-400 hover:text-rose-500 transition-colors p-1 cursor-pointer">✕</button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar">
                     {!existingTask && (
                         <div className="flex flex-col gap-4">
-                            <div className={`flex rounded-xl p-1 border ${theme === 'black' ? 'bg-[#111] border-[#333]' : 'bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'}`}>
-                                <button type="button" onClick={() => setTaskMode('group')} className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${taskMode === 'group' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-300'}`}>Group Task</button>
-                                <button type="button" onClick={() => setTaskMode('individual')} className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${taskMode === 'individual' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-300'}`}>Individual Task</button>
+                            <div className="grid grid-cols-2 gap-3">
+                                <button type="button" onClick={() => setTaskMode('group')} className={`p-3 rounded-xl border text-xs font-bold uppercase transition-all cursor-pointer ${taskMode === 'group' ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                                    Group Channel
+                                </button>
+                                <button type="button" onClick={() => setTaskMode('individual')} className={`p-3 rounded-xl border text-xs font-bold uppercase transition-all cursor-pointer ${taskMode === 'individual' ? 'border-amber-500 bg-amber-500/10 text-amber-500' : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'}`}>
+                                    Direct Dispatch
+                                </button>
                             </div>
 
-                            <div className={`flex rounded-xl p-1 border ${theme === 'black' ? 'bg-[#111] border-[#333]' : 'bg-slate-100 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'}`}>
-                                <button type="button" onClick={() => setSelectionMode('tags')} className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${selectionMode === 'tags' ? (theme === 'black' ? 'bg-[#222] text-amber-400 border border-[#333]' : 'bg-white dark:bg-slate-700 text-amber-500 shadow-sm') : 'text-slate-400 hover:text-slate-300'}`}>Target by Tags</button>
-                                <button type="button" onClick={() => setSelectionMode('users')} className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${selectionMode === 'users' ? (theme === 'black' ? 'bg-[#222] text-amber-400 border border-[#333]' : 'bg-white dark:bg-slate-700 text-amber-500 shadow-sm') : 'text-slate-400 hover:text-slate-300'}`}>Select Users</button>
+                            <div className="flex gap-4 text-xs font-semibold">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" checked={selectionMode === 'tags'} onChange={() => setSelectionMode('tags')} />
+                                    <span>Target by Team Tags</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input type="radio" checked={selectionMode === 'users'} onChange={() => setSelectionMode('users')} />
+                                    <span>Select Specific Users</span>
+                                </label>
                             </div>
-                        </div>
-                    )}
 
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Operation Title</label>
-                        <input type="text" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Design Hackathon Banners" className={`w-full rounded-xl px-4 py-3 focus:outline-none text-sm border ${inputBg}`} />
-                    </div>
-
-                    <div>
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Mission Details</label>
-                        <textarea rows="2" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Specify deliverables and guidelines..." className={`w-full rounded-xl px-4 py-3 focus:outline-none text-sm border resize-none custom-scrollbar ${inputBg}`} />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Deadline Date</label>
-                            <input type="date" min={today} required value={deadlineDate} onChange={(e) => setDeadlineDate(e.target.value)} className={`w-full rounded-xl px-4 py-3 focus:outline-none text-sm border ${inputBg}`} />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Deadline Time</label>
-                            <input type="time" required value={deadlineTime} onChange={(e) => setDeadlineTime(e.target.value)} className={`w-full rounded-xl px-4 py-3 focus:outline-none text-sm border ${inputBg}`} />
-                        </div>
-                    </div>
-
-                    {!existingTask && selectionMode === 'tags' && (
-                        <div className={`p-4 rounded-xl border ${theme === 'black' ? 'bg-[#111]/50 border-[#333]' : 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/30'}`}>
-                            <div className="flex justify-between items-center mb-4">
-                                <h3 className="text-xs font-black text-amber-500 uppercase tracking-wider">Target Audience</h3>
-                                <select value={tagMode} onChange={(e) => setTagMode(e.target.value)} className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-wider border cursor-pointer ${inputBg}`}>
-                                    <option value="single">Single Team</option><option value="multi">Multi-Team Collab</option>
-                                </select>
-                            </div>
-                            {tagMode === 'single' ? (
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Target Team</label>
-                                        <select value={targetTeam} onChange={(e) => { setTargetTeam(e.target.value); setTargetPost(CLUB_STRUCTURE[e.target.value][0]); }} className={`w-full rounded-lg px-3 py-2 focus:outline-none text-xs border cursor-pointer ${inputBg}`}>{Object.keys(CLUB_STRUCTURE).map(team => <option key={team} value={team}>{team}</option>)}</select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Target Post</label>
-                                        <select value={targetPost} onChange={(e) => setTargetPost(e.target.value)} className={`w-full rounded-lg px-3 py-2 focus:outline-none text-xs border cursor-pointer ${inputBg}`}>{CLUB_STRUCTURE[targetTeam].map(post => <option key={post} value={post}>{post}</option>)}</select>
+                            {selectionMode === 'tags' && (
+                                <div className="space-y-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700">
+                                    <div className="flex gap-2">
+                                        <select value={targetTeam} onChange={(e) => { setTargetTeam(e.target.value); setTargetPost(CLUB_STRUCTURE[e.target.value][0]); }} className={`flex-1 rounded-lg px-3 py-2 text-xs border ${inputBg}`}>
+                                            {Object.keys(CLUB_STRUCTURE).map(team => <option key={team} value={team}>{team}</option>)}
+                                        </select>
+                                        <select value={targetPost} onChange={(e) => setTargetPost(e.target.value)} className={`flex-1 rounded-lg px-3 py-2 text-xs border ${inputBg}`}>
+                                            {CLUB_STRUCTURE[targetTeam]?.map(post => <option key={post} value={post}>{post}</option>)}
+                                        </select>
                                     </div>
                                 </div>
-                            ) : (
-                                <div className="space-y-3">
-                                    <div className="flex justify-between items-center mb-2 pb-2 border-b border-inherit">
-                                        <span className="text-[10px] font-bold text-slate-500 uppercase">Select Number of Teams</span>
-                                        <select value={multiTeamCount} onChange={e => setMultiTeamCount(Number(e.target.value))} className={`rounded-lg px-3 py-1 text-xs border cursor-pointer ${inputBg}`}>{[2,3,4].map(num => <option key={num} value={num}>{num} Teams</option>)}</select>
-                                    </div>
-                                    {Array.from({length: multiTeamCount}).map((_, idx) => (
-                                        <div key={idx} className="grid grid-cols-2 gap-4">
-                                            <select value={multiTags[idx].team} onChange={e => handleMultiTagChange(idx, 'team', e.target.value)} className={`w-full rounded-lg px-3 py-2 focus:outline-none text-xs border cursor-pointer ${inputBg}`}>{Object.keys(CLUB_STRUCTURE).filter(t => t !== "All Teams").map(team => <option key={team} value={team}>{team}</option>)}</select>
-                                            <select value={multiTags[idx].post} onChange={e => handleMultiTagChange(idx, 'post', e.target.value)} className={`w-full rounded-lg px-3 py-2 focus:outline-none text-xs border cursor-pointer ${inputBg}`}>{CLUB_STRUCTURE[multiTags[idx].team].map(post => <option key={post} value={post}>{post}</option>)}</select>
+                            )}
+
+                            {selectionMode === 'users' && (
+                                <div className={`border rounded-xl p-3 max-h-36 overflow-y-auto custom-scrollbar ${theme === 'black' ? 'border-[#333] bg-[#111]' : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50'}`}>
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-2">Assign to Personnel</p>
+                                    {users.filter(u => u.username !== username).map(u => (
+                                        <div key={u.id} onClick={() => toggleUser(u.id)} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${selectedUsers.includes(u.id) ? 'bg-amber-500/20 border border-amber-500/30' : 'hover:bg-black/5 dark:hover:bg-white/5 border border-transparent'}`}>
+                                            <span className="text-sm font-semibold flex-1">{u.username}</span>
+                                            {selectedUsers.includes(u.id) && <span className="text-amber-500 font-bold">✓</span>}
                                         </div>
                                     ))}
                                 </div>
                             )}
                         </div>
                     )}
-                    {!existingTask && selectionMode === 'users' && (
-                        <div className={`p-4 rounded-xl border ${theme === 'black' ? 'bg-[#111]/50 border-[#333]' : 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/30'}`}>
-                            <h3 className="text-xs font-black text-amber-500 uppercase tracking-wider mb-3">Select Specific Members</h3>
-                            <div className="max-h-40 overflow-y-auto custom-scrollbar space-y-1">
-                                {users.filter(u => u.username !== username).map(user => (
-                                    <div key={user.id} onClick={() => toggleUser(user.id)} className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-all border ${selectedUsers.includes(user.id) ? (theme === 'black' ? 'bg-[#222] border-amber-500/50' : 'bg-amber-100 dark:bg-amber-500/20 border-amber-500/30') : 'border-transparent hover:bg-black/10 dark:hover:bg-white/5'}`}>
-                                        <div className="relative w-6 h-6 rounded-full bg-slate-300 dark:bg-slate-700 flex items-center justify-center text-[10px] font-bold text-white overflow-hidden">
-                                            {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : user.username.charAt(0).toUpperCase()}
-                                            <span className={`absolute bottom-0 right-0 w-2 h-2 rounded-full border border-inherit ${user.status === 'Offline' ? 'bg-slate-500' : 'bg-cyan-500'}`}></span>
-                                        </div>
-                                        <span className="text-sm font-semibold flex-1">{user.username} <span className="text-[9px] opacity-50 font-normal">({user.status})</span></span>
-                                        {selectedUsers.includes(user.id) && <span className="text-amber-500 font-bold">✓</span>}
-                                    </div>
-                                ))}
-                            </div>
+
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Task Title</label>
+                        <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required placeholder="e.g. Deploy staging environment" className={`w-full rounded-xl px-4 py-3 focus:outline-none text-sm border ${inputBg}`} />
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Description / Requirements</label>
+                        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows="3" placeholder="Provide instructions, links, or context..." className={`w-full rounded-xl px-4 py-3 focus:outline-none text-sm border ${inputBg}`} />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Deadline Date</label>
+                            <input type="date" min={today} value={deadlineDate} onChange={(e) => setDeadlineDate(e.target.value)} required className={`w-full rounded-xl px-4 py-3 focus:outline-none text-sm border ${inputBg}`} />
                         </div>
-                    )}
-                    
-                    {/* FIXED: Removed onClick from submit button to prevent double-firing! */}
-                    <div className={`p-5 border-t flex justify-end gap-3 ${headerBg} sticky bottom-0`}>
-                        <button type="button" onClick={onClose} className={`px-5 py-2.5 rounded-xl font-bold transition-colors ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'}`}>Cancel</button>
-                        <button type="submit" disabled={isSubmitting || !title.trim() || !deadlineDate} className={`px-6 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 flex items-center gap-2 ${theme === 'black' ? 'bg-amber-600 hover:bg-amber-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.2)]' : 'bg-amber-500 hover:bg-amber-600 text-white shadow-md shadow-amber-500/20'}`}>
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Deadline Time</label>
+                            <input type="time" value={deadlineTime} onChange={(e) => setDeadlineTime(e.target.value)} required className={`w-full rounded-xl px-4 py-3 focus:outline-none text-sm border ${inputBg}`} />
+                        </div>
+                    </div>
+
+                    <div className="pt-4 flex justify-end gap-3">
+                        <button type="button" onClick={onClose} className={`px-5 py-2.5 rounded-xl font-bold transition-colors cursor-pointer ${theme === 'black' ? 'text-gray-400 hover:bg-[#222]' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>Cancel</button>
+                        <button type="submit" disabled={isSubmitting || !title.trim() || !deadlineDate || !deadlineTime} className="px-6 py-2.5 rounded-xl font-bold transition-all disabled:opacity-50 bg-amber-500 hover:bg-amber-600 text-white cursor-pointer shadow-md shadow-amber-500/20">
                             {isSubmitting ? 'Saving...' : (existingTask ? 'Save Changes' : 'Dispatch Task')}
                         </button>
                     </div>
@@ -196,4 +179,5 @@ function TaskModal({ isOpen, onClose, theme, createTask, editTask, username, use
         </div>
     );
 }
+
 export default TaskModal;
