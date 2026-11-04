@@ -33,8 +33,6 @@ function MessageList({
         return parts.map((part, index) => part.toLowerCase() === query.toLowerCase() ? <span key={index} className="bg-amber-500 text-black font-bold px-1 rounded">{part}</span> : part);
     };
 
-    let currentDate = null;
-
     return (
         <div className="space-y-4 md:space-y-6 flex flex-col">
             {hasMoreMessages && messages.length >= 50 && (
@@ -48,8 +46,8 @@ function MessageList({
             {messages.map((msg, index) => {
                 const isMe = msg.username === currentUser.username;
                 const msgDate = formatDateHeader(msg.timestamp);
-                const showDateHeader = msgDate && msgDate !== currentDate;
-                if (showDateHeader) currentDate = msgDate;
+                const prevDate = index > 0 && messages[index - 1]?.timestamp ? formatDateHeader(messages[index - 1].timestamp) : null;
+                const showDateHeader = msgDate && msgDate !== prevDate;
 
                 // Safely convert SQLite 0/1 to boolean
                 const isDeleted = msg.is_deleted === 1 || msg.is_deleted === true;

@@ -347,7 +347,10 @@ async function startServer() {
     setupSocketIO();
 }
 
+let isSocketIOSetup = false;
 function setupSocketIO() {
+    if (isSocketIOSetup) return;
+    isSocketIOSetup = true;
     io.use((socket, next) => {
         const token = socket.handshake.auth.token;
         if (!token) return next(new Error('Authentication required'));
@@ -898,4 +901,4 @@ if (require.main === module) {
     startServer();
 }
 
-module.exports = { app, server, initializeDatabase, createAdminAccount, db };
+module.exports = { app, server, initializeDatabase, createAdminAccount, db, setupSocketIO, io, startServer };
