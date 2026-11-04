@@ -1,11 +1,11 @@
 services:
   - type: web
-    name: nic-messenger-backend
+    name: nic-club-chat-backend
     runtime: node
     plan: free
-    region: oregon
+    region: singapore
     rootDir: backend
-    buildCommand: npm install --omit=dev
+    buildCommand: npm install --omit=dev && npm rebuild sqlite3
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
